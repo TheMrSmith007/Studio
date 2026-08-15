@@ -13,8 +13,8 @@ dashscope.base_http_api_url = "https://dashscope-intl.aliyuncs.com/api/v1"
 VOICE = "longanyang"                      # CosyVoice v2 (swap via docs voice list)
 GOLD, BLACK = (212,175,55), (5,6,8)
 TMP = "/tmp"
-FONT = "assets/Cinzel-Bold.ttf" if os.path.exists("assets/Cinzel-Bold.ttf") else None
-def F(sz): return ImageFont.truetype(FONT, sz) if FONT else ImageFont.load_default()
+FONT = next((p for p in ["assets/Cinzel-Bold.ttf","/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf"] if os.path.exists(p)), None)
+def F(sz): return ImageFont.truetype(FONT, sz) if FONT else ImageFont.load_default(sz)
 
 # ---------------- HOUSE DNA (Netflix-crime style) ----------------
 DNA = """You are showrunner of SHADOW LEDGER, a prestige Netflix-style financial-crime
