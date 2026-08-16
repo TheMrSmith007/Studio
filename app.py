@@ -1,10 +1,7 @@
-import streamlit as st, requests, json, os, io, re, zipfile, hashlib, textwrap
+import streamlit as st, requests, json, os, io, re, zipfile, hashlib, textwrap, time
 from datetime import datetime, timedelta, date
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
-import dashscope
-from dashscope import VideoSynthesis, ImageSynthesis
-from dashscope.audio.tts_v2 import SpeechSynthesizer
 from moviepy.video.io.VideoFileClip import VideoFileClip
 from moviepy.audio.io.AudioFileClip import AudioFileClip
 from moviepy.video.VideoClip import ImageClip
@@ -13,10 +10,9 @@ from moviepy.video.compositing.CompositeVideoClip import CompositeVideoClip
 from moviepy.video.compositing.concatenate import concatenate_videoclips
 import moviepy.video.fx as vfx
 
-# ---------------- CONFIG ----------------
+# ---------------- CONFIG (pure requests — no SDK, no Pillow dependency) ----------------
 DASH, YT, PEX = st.secrets["DASHSCOPE_API_KEY"], st.secrets["YOUTUBE_API_KEY"], st.secrets["PEXELS_API_KEY"]
-dashscope.base_http_api_url = "https://dashscope-intl.aliyuncs.com/api/v1"
-dashscope.base_websocket_api_url = "wss://dashscope-intl.aliyuncs.com/api-ws/v1/inference"
+BASE = "https://dashscope-intl.aliyuncs.com/api/v1"
 GOLD, BLACK = (212,175,55), (5,6,8)
 TMP = "/tmp"
 FONT = next((p for p in ["assets/Cinzel-Bold.ttf","/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf"] if os.path.exists(p)), None)
@@ -29,6 +25,12 @@ MOODS = {
  "Cold expose": "clinical, sharp, controlled anger, precise diction, ice-cold delivery",
  "Hushed suspense": "near-whisper, tense, every word a secret, long silences",
  "Hopeful storyteller": "warm, admiring, quietly triumphant, a smile in the voice, still slow and cinematic",
+}
+ANGLES = {
+ "Dark expose (default)": "Tone: dark investigative expose. Dopamine via outrage, justice, revelation.",
+ "Mystery / curiosity": "Tone: puzzle-box mystery. Dopamine via curiosity loops and the final click of understanding.",
+ "David vs Goliath": "Tone: underdog versus a financial giant. Dopamine via fairness and clever resistance.",
+ "Comeback / positive)": "Tone: triumphant human comeback inside finance. NOT a forced happy ending — earned, bittersweet, still leaves an open question.",
 }
 ANGLES = {
  "Dark expose (default)": "Tone: dark investigative expose. Dopamine via outrage, justice, revelation.",
@@ -91,25 +93,36 @@ def qwen(prompt, sys=None):
 def wan_video_prompt(v): return (f"{v}. cinematic documentary film still, anamorphic 2.39:1, "
     "35mm grain, low-key chiaroscuro, crushed blacks, gold practicals, teal shadows, slow dolly, no text, no watermark")
 
-# ---------------- GENERATORS (voice can NEVER fail: DashScope chain -> pure-Python gTTS) ----------------
+# ---------------- GENERATORS (REST + pure-Python voice: nothing to compile) ----------------
 def speak(text, voice, mood):
-    for model, instr in (("cosyvoice-v2", MOODS[mood]), ("cosyvoice-v2", None), ("cosyvoice-v1", None)):
-        try:
-            kw = {"model": model, "voice": voice}
-            if instr: kw["instruction"] = instr
-            return SpeechSynthesizer(**kw).call(text)
-        except Exception:
-            continue
     from gtts import gTTS
-    p = f"{TMP}/gtts_{hashlib.md5(text.encode()).hexdigest()}.mp3"
+    p = f"{TMP}/gtts_{hashlib.md5((text+mood).encode()).hexdigest()}.mp3"
     gTTS(text=text, lang="en").save(p)
     return open(p, "rb").read()
+def _task(tid):
+    return requests.get(f"{BASE}/tasks/{tid}", headers={"Authorization": f"Bearer {DASH}"}).json()
 def wan_video(prompt):
-    r = VideoSynthesis.wait(VideoSynthesis.async_call(model="wan2.1-t2v-turbo", prompt=prompt, size="1280*720"))
-    return r.output.video_url
+    r = requests.post(f"{BASE}/services/aigc/video-generation/video-synthesis",
+        headers={"Authorization": f"Bearer {DASH}", "Content-Type": "application/json", "X-DashScope-Async": "enable"},
+        json={"model":"wan2.1-t2v-turbo","input":{"prompt":prompt},"parameters":{"size":"1280*720"}}).json()
+    tid = r["output"]["task_id"]
+    for _ in range(150):
+        time.sleep(4)
+        q = _task(tid); stt = q["output"]["task_status"]
+        if stt == "SUCCEEDED": return q["output"]["video_url"]
+        if stt in ("FAILED","CANCELED"): raise RuntimeError("video task failed")
+    raise RuntimeError("video timeout")
 def wan_images(prompt, n=2):
-    r = ImageSynthesis.call(model="wanx2.1-t2i-turbo", prompt=prompt, n=n, size="1280*720")
-    return [x["url"] for x in r.output.results]
+    r = requests.post(f"{BASE}/services/aigc/text2image/image-synthesis",
+        headers={"Authorization": f"Bearer {DASH}", "Content-Type": "application/json", "X-DashScope-Async": "enable"},
+        json={"model":"wanx2.1-t2i-turbo","input":{"prompt":prompt},"parameters":{"size":"1280*720","n":n}}).json()
+    tid = r["output"]["task_id"]
+    for _ in range(60):
+        time.sleep(3)
+        q = _task(tid); stt = q["output"]["task_status"]
+        if stt == "SUCCEEDED": return [x["url"] for x in q["output"]["results"]]
+        if stt in ("FAILED","CANCELED"): raise RuntimeError("image task failed")
+    raise RuntimeError("image timeout")
 def pexels_clip(q):
     v = requests.get("https://api.pexels.com/videos/search", headers={"Authorization":PEX}, params={"query":q,"per_page":5}).json()["videos"]
     return v[0]["video_files"][0]["link"]
@@ -452,7 +465,7 @@ def pack_entries(it, ep, support, shop, series):
     entries.append(("rights_record.txt", RIGHTS.encode(), False))
     return entries, safe
 
-# ---------------- UI (MISSION CONTROL v21) ----------------
+# ---------------- UI (MISSION CONTROL v22) ----------------
 st.set_page_config(page_title="Shadow Ledger Studio", page_icon="🎬", layout="wide")
 st.markdown("""<style>
  .stApp{background:#0b0e13}
@@ -784,10 +797,10 @@ with tab3:
             st.json(safe)
 
 with tab4:
-    st.markdown("""**v21 MISSION CONTROL.** Compile-proof build (pure-Python voice parachute). SERIES MODE talks to you
-    (✅ EP 1 done → starting EP 2…), skips finished episodes on resume, continues past failures, downloads in SMALL
-    PARTS (per-episode MP4, per-episode pack on demand, tiny paperwork zip with SCHEDULE.txt Fridays-16:00-EST plan).
-    Voice can never fail (DashScope chain → gTTS). Plus: 🙏 supporter credits, 💼 Sponsor Suite, ✅/⭐/🔒 chips, READY
-    captions, retry-only-failed, auto-numbered shop-ready packs, Gate + YouTube Guard, rights record + checklist.
+    st.markdown("""**v22 MISSION CONTROL — dependency-free engine.** The dashscope SDK (which dragged Pillow into the
+    build) is GONE; video/images now use plain REST calls, voice uses pure-Python gTTS. Nothing left to compile.
+    SERIES MODE talks to you (✅ EP 1 done → starting EP 2…), resumes after crashes, downloads in SMALL PARTS with
+    SCHEDULE.txt (Fridays 16:00 EST). Plus: 🙏 supporter credits, 💼 Sponsor Suite, ✅/⭐/🔒 chips, READY captions,
+    retry-only-failed, auto-numbered shop-ready packs, Gate + YouTube Guard, rights record + checklist.
     **PHASED REVENUE:** ☕ tips now · 📄 Case Files $5 next · 📚 affiliates later · 💼 sponsors + memberships + merch.
     **Roadmap:** PWA → native app → OAuth upload → dubs → analytics loop.""")
