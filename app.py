@@ -16,6 +16,7 @@ import moviepy.video.fx as vfx
 # ---------------- CONFIG ----------------
 DASH, YT, PEX = st.secrets["DASHSCOPE_API_KEY"], st.secrets["YOUTUBE_API_KEY"], st.secrets["PEXELS_API_KEY"]
 dashscope.base_http_api_url = "https://dashscope-intl.aliyuncs.com/api/v1"
+dashscope.base_websocket_api_url = "wss://dashscope-intl.aliyuncs.com/api-ws/v1/inference"
 GOLD, BLACK = (212,175,55), (5,6,8)
 TMP = "/tmp"
 FONT = next((p for p in ["assets/Cinzel-Bold.ttf","/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf"] if os.path.exists(p)), None)
@@ -380,7 +381,7 @@ Grab it for $5 (pay-what-you-want): [PASTE YOUR KO-FI SHOP LINK HERE]
 The video stays free forever. Case Files fund the next investigation. Thank you for standing with the ledger.
 """
 
-# ---------------- UI (MISSION CONTROL v16 FINAL) ----------------
+# ---------------- UI (MISSION CONTROL v17) ----------------
 st.set_page_config(page_title="Shadow Ledger Studio", page_icon="🎬", layout="wide")
 st.markdown("""<style>
  .stApp{background:#0b0e13}
@@ -410,8 +411,10 @@ for k in order:
     else: states[k] = "now" if not cur_set else "todo"; cur_set = True
 pct = sum(flags.values())/len(order)
 st.title("🎬 SHADOW LEDGER — Mission Control")
-st.markdown("".join(f"<span class='chip {states[k]}'>{labels[k]}</span>" for k in order), unsafe_allow_html=True)
+st.markdown("".join(f"<span class='chip {states[k]}'>{'✅ ' if states[k]=='done' else '⭐ ' if states[k]=='now' else '🔒 '}{labels[k]}</span>" for k in order), unsafe_allow_html=True)
 st.progress(pct, text=f"Pipeline {int(pct*100)}% complete")
+if st.session_state.get("last_fail"):
+    st.error(f"⚠️ Last attempt failed at {st.session_state['last_fail']}. Everything BEFORE it is still ✅ complete — press that step's button to retry ONLY it.")
 
 support = st.sidebar.text_input("☕ Support link (Ko-fi)", "https://ko-fi.com/shadowledger")
 shop = st.sidebar.text_input("📄 Case File shop link (Phase 2 — leave blank for now)", "")
@@ -419,9 +422,12 @@ ep_num = st.sidebar.text_input("Episode # (auto-names PDF/thumbs)", "001")
 voice = st.sidebar.text_input("Narrator voice (CosyVoice v2 ID)", "longanyang")
 mood = st.sidebar.selectbox("Narration mood", list(MOODS))
 if st.sidebar.button("🔊 Hear 10s voice audition"):
-    ab = f"{TMP}/audition.mp3"
-    open(ab,"wb").write(speak("In 2019, a single signature moved forty-one billion dollars. Nobody noticed. Until now.", voice, mood))
-    st.sidebar.audio(ab)
+    try:
+        ab = f"{TMP}/audition.mp3"
+        open(ab,"wb").write(speak("In 2019, a single signature moved forty-one billion dollars. Nobody noticed. Until now.", voice, mood))
+        st.sidebar.audio(ab)
+    except Exception as e:
+        st.sidebar.error(f"🔇 Audition unavailable right now: {str(e)[:80]} — the full render will retry automatically.")
 music = st.sidebar.file_uploader("House score (optional)", type=["mp3","wav"])
 series = st.sidebar.text_input("Series brand", "The Monopoly Files")
 adv = balance_advice(line)
@@ -440,6 +446,7 @@ with tab1:
             score, why = golden_egg(s.strip())
             results.append((s.strip(), score, why))
         st.session_state.scan = sorted(results, key=lambda r: -r[1])
+        st.session_state.last_fail = None
     if st.session_state.get("scan"):
         for j,(t, sc, w) in enumerate(st.session_state.scan):
             style = "border-color:#e8c766" if j==0 else ""
@@ -458,6 +465,7 @@ with tab2:
     else:
         st.markdown("## STEP 2 · Tick your slate")
         st.caption("Tick every topic you want queued. The 🏆 winner is pre-ticked.")
+        st.caption("🟢 READY for STEP 2 — tick, then press the gold button once. (If a button seems dead for 3s, the app was still thinking — one more click is safe.)")
         picks = []
         for j,(t, sc, w) in enumerate(st.session_state.scan):
             if st.checkbox(f"{t}  (🥚 {sc}/100)", value=(j==0), key=f"ck_{t}"): picks.append((t, sc))
@@ -466,7 +474,7 @@ with tab2:
                 if not any(i["topic"]==t for i in line):
                     line.append({"topic":t,"score":sc,"tag":"","status":"queued","script":None,"gate":None,"out":None,"srt":None,"err":"","angle":None,"sp":""})
             save_line(line)
-            st.success("✅ Slate locked. ➡️ NEXT: STEP 3 series check appeared below.")
+            st.success("✅ STEP 2 complete — slate locked. ➡️ NEXT: STEP 3 series check below.")
         with st.expander("➕ Add a custom topic instead"):
             custom = st.text_input("Custom topic", "")
             if custom.strip() and st.button("Add custom topic"):
@@ -477,6 +485,7 @@ with tab2:
             for i, it in enumerate(line):
                 st.markdown(f"<div class='card'>EP {i+1} · <b>{it['topic']}</b> {('['+it['tag']+']' if it['tag'] else '')} · {TONE_LABEL.get(it.get('angle') or 'Dark expose (default)','')} {('· 💼 '+it['sp']) if it.get('sp') else ''} — <code>{it['status']}</code></div>", unsafe_allow_html=True)
             st.markdown("## STEP 3 · Series potential")
+            st.caption("🟢 READY for STEP 3 — check series, or skip to standalone.")
             c1, c2 = st.columns(2)
             if c1.button("🎭 STEP 3 · Check series potential"):
                 st.session_state.splan = series_plan(line[0]["topic"])
@@ -492,9 +501,10 @@ with tab2:
                             line.append({"topic":e,"score":line[0]["score"],"tag":"SERIES","status":"queued","script":None,"gate":None,"out":None,"srt":None,"err":"","angle":None,"sp":""})
                     save_line(line)
                     st.session_state.series_checked = True
-                    st.success("✅ Series added. ➡️ NEXT: STEP 4 below.")
+                    st.success("✅ STEP 3 complete — series added. ➡️ NEXT: STEP 4 below.")
         if flags["series"]:
             st.markdown("## STEP 4 · Script + 🛡️ Quality Gate + 🚨 YouTube Guard")
+            st.caption("🟢 READY for STEP 4 — writes script + runs the Gate in one press.")
             if any(i["status"]=="queued" for i in line):
                 if st.button("📜 STEP 4 · Write script + run Quality Gate"):
                     it = next(x for x in line if x["status"]=="queued")
@@ -511,7 +521,7 @@ with tab2:
                     it["status"] = "scripted"; save_line(line)
                     st.session_state.edits = {i2:(s["narration"],s["visual"]) for i2,s in enumerate(it["script"]["scenes"])}
                     bar.progress(1.0, text="✅ Script + Gate complete")
-                    st.success("✅ STEP 4 complete. ➡️ NEXT: review & APPROVE below.")
+                    st.success("✅ STEP 4 complete — script + Gate passed. ➡️ NEXT: review & APPROVE below.")
         cur = next((x for x in line if x["status"]=="scripted"), None)
         if cur:
             st.markdown("## STEP 5 · Review & Approve (Director's Cut)")
@@ -538,9 +548,10 @@ with tab2:
                     nn, vv = st.session_state.edits.get(i2, (s["narration"], s["visual"]))
                     s["narration"], s["visual"] = nn, vv
                 cur["status"] = "approved"; save_line(line)
-                st.success("✅ Approved. ➡️ NEXT: optional 💼 SPONSOR SUITE, then STEP 6 Render.")
+                st.success("✅ STEP 5 complete — approved. ➡️ NEXT: optional 💼 SPONSOR SUITE, then STEP 6 Render.")
         if flags["approve"]:
             st.markdown("## STEP 6 · Render (live progress bar)")
+            st.caption("🟢 READY for STEP 6 — renders ONLY the approved episode. Keep this tab open while the bar fills.")
             itn = next((x for x in line if x["status"]=="approved"), None)
             if itn and itn.get("script"):
                 secs, cost = estimate(itn["script"], pilot)
@@ -558,12 +569,14 @@ with tab2:
                         out, srt = render(it["script"], it["topic"], series, pilot, mp3, voice, mood, sp, prog=bar.progress, angle=it.get("angle") or "Dark expose (default)")
                         it["out"], it["srt"], it["status"], it["err"] = out, srt, "rendered", ""
                         save_line(line)
+                        st.session_state.last_fail = None
                         st.video(out)
                         st.download_button("⬇️ Download this episode", open(out,"rb").read(), f"EPISODE_{ep_num}_{slug(it['topic'])}.mp4")
-                        st.success("✅ STEP 6 complete. ➡️ NEXT: 📦 3·PUBLISH tab.")
+                        st.success("✅ STEP 6 complete — rendered successfully. ➡️ NEXT: 📦 3·PUBLISH tab.")
                     except Exception as e:
                         it["status"], it["err"] = "failed", str(e)[:150]; save_line(line)
-                        st.error(f"Render failed (line saved — press Render to retry): {e}")
+                        st.session_state.last_fail = "STEP 6 (Render)"
+                        st.error(f"Render failed (line saved — press Render to retry ONLY this step): {e}")
     st.download_button("💾 Backup production line", json.dumps(line).encode(), "shadow_line.json")
     up = st.file_uploader("Restore backup", type=["json"])
     if up: st.session_state.line = json.load(up); save_line(st.session_state.line)
@@ -585,8 +598,11 @@ with tabS:
     sp_image = st.file_uploader("Sponsor image/poster (optional — auto-cropped + gold lower-third)", type=["png","jpg","jpeg"])
     if st.button("🔊 Audition ad read"):
         if sp_script.strip():
-            ap = f"{TMP}/ad_audition.mp3"; open(ap,"wb").write(speak(sp_script, voice, mood))
-            st.audio(ap)
+            try:
+                ap = f"{TMP}/ad_audition.mp3"; open(ap,"wb").write(speak(sp_script, voice, mood))
+                st.audio(ap)
+            except Exception as e:
+                st.error(f"🔇 Audition unavailable right now: {str(e)[:80]}")
     sp_place = st.selectbox("Placement", ["After cold open + title (TV style)", "Before the final reveal"])
     sp_ok = st.checkbox("✅ Sponsor approved this cut")
     if st.button("💾 Save sponsor slot → attaches to next render"):
@@ -605,6 +621,7 @@ with tab3:
         st.warning("⬅️ Render an episode first (🏭 2·PRODUCE → STEP 6).")
     else:
         st.markdown("## STEP 7 · Build the Publish Pack (auto-numbered, shop-ready)")
+        st.caption("🟢 READY for STEP 7 — builds the numbered pack in one press.")
         choice = st.selectbox("Episode to pack", [i["topic"] for i in rendered])
         it = rendered[[i["topic"] for i in rendered].index(choice)]
         sl = slug(it["topic"])
@@ -644,14 +661,15 @@ with tab3:
                 zf.writestr("upload_checklist.txt", CHECKLIST.format(sp=f"YES — {it['sp']} (tick paid promotion + disclose)" if it.get("sp") else "No"))
                 zf.writestr("rights_record.txt", RIGHTS)
             st.session_state.packed = True
+            st.session_state.last_fail = None
             st.download_button("📦 Download PUBLISH PACK (zip)", z.getvalue(), f"SHADOW_LEDGER_PACK_{ep_num}.zip")
             st.success(f"✅ STEP 7 complete — EP#{ep_num} pack ready: numbered episode, shorts, thumbs, Case File PDF + Ko-fi listing. 🏁")
             st.json(safe)
 
 with tab4:
-    st.markdown("""**v16 FINAL MISSION CONTROL.** Pipeline: scan → slate → series → script+Gate+Guard → Director's Cut →
-    render → publish pack with AUTO-NUMBERED shop-ready assets (CASE_FILE_###, THUMB_###, kofi_product_### listing).
-    **PHASED REVENUE:** PHASE 1 ☕ Ko-fi tips (auto everywhere) · PHASE 2 📄 Case Files $5 (folder builds itself; drag to
-    Ko-fi when ready) · PHASE 3 📚 affiliates · PHASE 4 💼 sponsors + memberships + merch. Core video FREE forever;
-    supporters buy depth & belonging. Plus: Sponsor Suite, tone badges, balance advisor, auditions, estimates, retries,
-    crash-resume, rights record + upload checklist. **Roadmap:** PWA → native app → OAuth upload → dubs → analytics.""")
+    st.markdown("""**v17 MISSION CONTROL.** Fixes: international voice websocket (no more 5s timeout) · crash-proof auditions ·
+    ✅/⭐/🔒 step chips · READY captions · retry-only-failed-step banner. Pipeline: scan → slate → series →
+    script+Gate+Guard → Director's Cut → render → auto-numbered shop-ready pack (CASE_FILE_###, THUMB_###,
+    kofi_product_###). **PHASED REVENUE:** ☕ tips now · 📄 Case Files $5 next · 📚 affiliates later · 💼 sponsors +
+    memberships + merch. Core video FREE forever; supporters buy depth & belonging. **Roadmap:** PWA → native app →
+    OAuth upload → dubs → analytics loop.""")
