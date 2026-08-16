@@ -1,6 +1,5 @@
 streamlit
 requests
-dashscope
 moviepy==2.1.2
 imageio-ffmpeg
 gTTS
