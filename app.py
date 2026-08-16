@@ -1,4 +1,4 @@
-import streamlit as st, requests, json, os, io, re, zipfile, hashlib, textwrap, asyncio
+import streamlit as st, requests, json, os, io, re, zipfile, hashlib, textwrap
 from datetime import datetime, timedelta, date
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
@@ -30,9 +30,6 @@ MOODS = {
  "Hushed suspense": "near-whisper, tense, every word a secret, long silences",
  "Hopeful storyteller": "warm, admiring, quietly triumphant, a smile in the voice, still slow and cinematic",
 }
-EDGE_VOICES = {"Calm investigator (default)":"en-US-GuyNeural","Concerned witness":"en-US-AriaNeural",
- "Grave elegy":"en-US-GuyNeural","Cold expose":"en-US-ChristopherNeural",
- "Hushed suspense":"en-US-GuyNeural","Hopeful storyteller":"en-US-JennyNeural"}
 ANGLES = {
  "Dark expose (default)": "Tone: dark investigative expose. Dopamine via outrage, justice, revelation.",
  "Mystery / curiosity": "Tone: puzzle-box mystery. Dopamine via curiosity loops and the final click of understanding.",
@@ -94,7 +91,7 @@ def qwen(prompt, sys=None):
 def wan_video_prompt(v): return (f"{v}. cinematic documentary film still, anamorphic 2.39:1, "
     "35mm grain, low-key chiaroscuro, crushed blacks, gold practicals, teal shadows, slow dolly, no text, no watermark")
 
-# ---------------- GENERATORS (voice can NEVER fail) ----------------
+# ---------------- GENERATORS (voice can NEVER fail: DashScope chain -> pure-Python gTTS) ----------------
 def speak(text, voice, mood):
     for model, instr in (("cosyvoice-v2", MOODS[mood]), ("cosyvoice-v2", None), ("cosyvoice-v1", None)):
         try:
@@ -103,9 +100,9 @@ def speak(text, voice, mood):
             return SpeechSynthesizer(**kw).call(text)
         except Exception:
             continue
-    import edge_tts
-    p = f"{TMP}/edge_{hashlib.md5(text.encode()).hexdigest()}.mp3"
-    asyncio.run(edge_tts.Communicate(text, EDGE_VOICES.get(mood, "en-US-GuyNeural"), rate="-8%").save(p))
+    from gtts import gTTS
+    p = f"{TMP}/gtts_{hashlib.md5(text.encode()).hexdigest()}.mp3"
+    gTTS(text=text, lang="en").save(p)
     return open(p, "rb").read()
 def wan_video(prompt):
     r = VideoSynthesis.wait(VideoSynthesis.async_call(model="wan2.1-t2v-turbo", prompt=prompt, size="1280*720"))
@@ -455,7 +452,7 @@ def pack_entries(it, ep, support, shop, series):
     entries.append(("rights_record.txt", RIGHTS.encode(), False))
     return entries, safe
 
-# ---------------- UI (MISSION CONTROL v20) ----------------
+# ---------------- UI (MISSION CONTROL v21) ----------------
 st.set_page_config(page_title="Shadow Ledger Studio", page_icon="🎬", layout="wide")
 st.markdown("""<style>
  .stApp{background:#0b0e13}
@@ -787,10 +784,10 @@ with tab3:
             st.json(safe)
 
 with tab4:
-    st.markdown("""**v20 MISSION CONTROL.** SERIES MODE now talks to you (✅ EP 1 done → starting EP 2…), skips finished
-    episodes on resume, continues past failures, and downloads in SMALL PARTS (per-episode MP4, per-episode pack on
-    demand, tiny paperwork zip with SCHEDULE.txt Fridays-16:00-EST plan). Voice can never fail (DashScope chain → free
-    neural fallback). Plus: 🙏 supporter credits, 💼 Sponsor Suite, ✅/⭐/🔒 chips, READY captions, retry-only-failed,
-    auto-numbered shop-ready packs, Gate + YouTube Guard, rights record + checklist. **PHASED REVENUE:** ☕ tips now ·
-    📄 Case Files $5 next · 📚 affiliates later · 💼 sponsors + memberships + merch. **Roadmap:** PWA → native app →
-    OAuth upload → dubs → analytics loop.""")
+    st.markdown("""**v21 MISSION CONTROL.** Compile-proof build (pure-Python voice parachute). SERIES MODE talks to you
+    (✅ EP 1 done → starting EP 2…), skips finished episodes on resume, continues past failures, downloads in SMALL
+    PARTS (per-episode MP4, per-episode pack on demand, tiny paperwork zip with SCHEDULE.txt Fridays-16:00-EST plan).
+    Voice can never fail (DashScope chain → gTTS). Plus: 🙏 supporter credits, 💼 Sponsor Suite, ✅/⭐/🔒 chips, READY
+    captions, retry-only-failed, auto-numbered shop-ready packs, Gate + YouTube Guard, rights record + checklist.
+    **PHASED REVENUE:** ☕ tips now · 📄 Case Files $5 next · 📚 affiliates later · 💼 sponsors + memberships + merch.
+    **Roadmap:** PWA → native app → OAuth upload → dubs → analytics loop.""")
