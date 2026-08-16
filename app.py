@@ -1,20 +1,32 @@
 import streamlit as st, requests, json, os, io, re, zipfile, hashlib
+from datetime import datetime, timedelta
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 import dashscope
 from dashscope import VideoSynthesis, ImageSynthesis
 from dashscope.audio.tts_v2 import SpeechSynthesizer
-from moviepy import (VideoFileClip, AudioFileClip, ImageClip, AudioClip,
-                     CompositeVideoClip, concatenate_videoclips, vfx)
+from moviepy.video.io.VideoFileClip import VideoFileClip
+from moviepy.audio.io.AudioFileClip import AudioFileClip
+from moviepy.video.VideoClip import ImageClip
+from moviepy.audio.AudioClip import AudioClip, CompositeAudioClip, AudioArrayClip
+from moviepy.video.compositing.CompositeVideoClip import CompositeVideoClip
+from moviepy.video.compositing.concatenate import concatenate_videoclips
+import moviepy.video.fx as vfx
 
 # ---------------- CONFIG ----------------
 DASH, YT, PEX = st.secrets["DASHSCOPE_API_KEY"], st.secrets["YOUTUBE_API_KEY"], st.secrets["PEXELS_API_KEY"]
 dashscope.base_http_api_url = "https://dashscope-intl.aliyuncs.com/api/v1"
-VOICE = "longanyang"                      # CosyVoice v2 (swap via docs voice list)
 GOLD, BLACK = (212,175,55), (5,6,8)
 TMP = "/tmp"
 FONT = next((p for p in ["assets/Cinzel-Bold.ttf","/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf"] if os.path.exists(p)), None)
 def F(sz): return ImageFont.truetype(FONT, sz) if FONT else ImageFont.load_default(sz)
+MOODS = {
+ "Calm investigator (default)": "low, calm, intimate documentary voice, slow deliberate pace, slightly breathy, grave tension, long pause before every reveal",
+ "Concerned witness": "worried, urgent, leaning in, slightly trembling with concern, as if warning a friend",
+ "Grave elegy": "mournful, heavy, slow, deep pauses, the voice of a eulogy for something that should never have happened",
+ "Cold expose": "clinical, sharp, controlled anger, precise diction, ice-cold delivery",
+ "Hushed suspense": "near-whisper, tense, every word a secret, long silences",
+}
 
 # ---------------- HOUSE DNA (Netflix-crime style) ----------------
 DNA = """You are showrunner of SHADOW LEDGER, a prestige Netflix-style financial-crime
@@ -34,14 +46,17 @@ def qwen(prompt, sys=None):
     r = requests.post("https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",
         headers={"Authorization": f"Bearer {DASH}"},
         json={"model":"qwen-plus","messages":m,"response_format":{"type":"json_object"}}).json()
-    return r.json() if isinstance(r, dict) and "choices" not in r else json.loads(r["choices"][0]["message"]["content"])
+    return json.loads(r["choices"][0]["message"]["content"])
 
 def wan_video_prompt(v): return (f"{v}. cinematic documentary film still, anamorphic 2.39:1, "
     "35mm grain, low-key chiaroscuro, crushed blacks, gold practicals, teal shadows, slow dolly, no text, no watermark")
 
 # ---------------- GENERATORS ----------------
-def speak(text):
-    return SpeechSynthesizer(model="cosyvoice-v2", voice=VOICE).call(text)
+def speak(text, voice, mood):
+    try:
+        return SpeechSynthesizer(model="cosyvoice-v2", voice=voice, instruction=MOODS[mood]).call(text)
+    except Exception:
+        return SpeechSynthesizer(model="cosyvoice-v2", voice=voice).call(text)
 def wan_video(prompt):
     r = VideoSynthesis.wait(VideoSynthesis.async_call(model="wan2.1-t2v-turbo", prompt=prompt, size="1280*720"))
     return r.output.video_url
@@ -65,17 +80,16 @@ def golden_egg(topic):
     vs = yt("videos", part="statistics,snippet", id=",".join(ids))["items"]
     views = [int(v["statistics"]["viewCount"]) for v in vs]
     demand = min(45, int(sum(views)/len(views)/1_000_000*9))
-    ages = [(1599999999999 - int(v["snippet"]["publishedAt"][:4])*31536000000) for v in vs]
-    fresh = min(20, int(sum(1 for a in ages if a < 2*31536000000)*2.5))
+    fresh = min(20, int(sum(1 for v in vs if (datetime.now() - datetime.fromisoformat(v["snippet"]["publishedAt"].replace("Z",""))) < timedelta(days=730))*2.5))
     chans = {v["snippet"]["channelId"] for v in vs}
-    comp = max(0, 20 - len(chans)*2)                     # many distinct channels = low comp
+    comp = max(0, 20 - len(chans)*2)
     break_out = min(15, sum(1 for v in vs if int(v["statistics"]["viewCount"])>200_000)*5)
     return min(100, demand+fresh+comp+break_out), f"demand {demand}/45 · momentum {fresh}/20 · open field {comp}/20 · small-channel proof {break_out}/15"
 def trend_radar(seed):
     sug = requests.get("https://suggestqueries.google.com/complete/search",
         params={"client":"youtube","q":seed}).json()[1]
     wk = yt("search", part="snippet", q=seed, type="video", order="viewCount",
-            publishedAfter=st.session_state.get("week_ago","2026-08-08T00:00:00Z"), maxResults=5)
+            publishedAfter=(datetime.utcnow()-timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ"), maxResults=5)
     vel = [f"{i['snippet']['title'][:40]}…" for i in wk.get("items",[])]
     return [s[0] if isinstance(s,list) else s for s in sug], vel
 
@@ -102,35 +116,80 @@ def make_bug():
 make_bug()
 def silence(d): return AudioClip(lambda t: [0,0], d, fps=44100)
 
-# ---------------- PRODUCTION ENGINE ----------------
-def produce(topic, series, pilot, support, music):
-    sc = qwen(DNA.format(topic=topic, series=series))
+# ---------------- PROCEDURAL SOUND DESIGN (zero-license house sound) ----------------
+SR = 22050
+def sound_bed(dur, markers):
+    n = int(dur*SR); t = np.arange(n)/SR
+    bed = 0.10*np.sin(2*np.pi*52*t)*(0.6+0.4*np.sin(2*np.pi*0.11*t)) + 0.05*np.sin(2*np.pi*78*t+1.3)
+    rng = np.random.default_rng(7)
+    noise = np.convolve(rng.standard_normal(n), np.ones(40)/40, mode="same")
+    for m in markers:
+        s, e = max(0,int((m-3)*SR)), int(m*SR)
+        if e > s:
+            seg = np.arange(e-s)/(e-s); bed[s:e] += noise[s:e]*0.12*seg**2
+        s, e = int(m*SR), min(n, int((m+1.6)*SR)); tt = np.arange(e-s)/SR
+        bed[s:e] += 0.35*np.sin(2*np.pi*45*tt)*np.exp(-3*tt)
+    step = int(1.4*SR); tk = int(0.03*SR)
+    tt = np.arange(tk)/SR; tick = 0.05*np.sin(2*np.pi*1800*tt)*np.exp(-80*tt)
+    for s in range(0, n-tk, step): bed[s:s+tk] += tick
+    bed = bed/np.max(np.abs(bed))*0.5
+    return AudioArrayClip(np.stack([bed,bed],axis=1), fps=SR)
+
+# ---------------- SCRIPT + RENDER (Director's Cut + Sponsor Mode) ----------------
+def write_script(topic, series):
+    return qwen(DNA.format(topic=topic, series=series))
+
+def sponsor_blocks(sp, voice, mood):
+    b = [(ImageClip(card_img("A WORD FROM", sp["name"])).with_duration(2.5), silence(2.5), None)]
+    if sp.get("video"):
+        svc = VideoFileClip(sp["video"]).resized((1280,720)).with_fps(24)
+        sa = svc.audio if svc.audio is not None else silence(svc.duration)
+        b.append((svc, sa, f"[Sponsor segment: {sp['name']}]"))
+    else:
+        ap = f"{TMP}/sp.mp3"
+        open(ap,"wb").write(speak(sp.get("script") or f"This investigation is brought to you by {sp['name']}.", voice, mood))
+        ac = AudioFileClip(ap)
+        b.append((ImageClip(card_img(sp["name"], "a word from our sponsor")).with_duration(ac.duration), ac, sp.get("script","")))
+    b.append((ImageClip(card_img("NOW, BACK TO", "the investigation")).with_duration(2.5), silence(2.5), None))
+    return b
+
+def render(sc, topic, series, pilot, music, voice, mood, sp=None):
     scenes = sc["scenes"][:4] if pilot else sc["scenes"]
-    vclips, acls, srt, t = [], [], [], 0.0
+    parts = []
     for i, s in enumerate(scenes):
-        ap = f"{TMP}/a{i}.mp3"; open(ap,"wb").write(speak(s["narration"]))
-        ac = AudioFileClip(ap); acls.append(ac)
+        ap = f"{TMP}/a{i}.mp3"; open(ap,"wb").write(speak(s["narration"], voice, mood))
+        ac = AudioFileClip(ap)
         try: vu = wan_video(wan_video_prompt(s["visual"]))
         except Exception: vu = pexels_clip(s["visual"].split(".")[0])
         vc = VideoFileClip(fetch(vu,f"c{i}.mp4")).without_audio().resized((1280,720)).with_fps(24)
         while vc.duration < ac.duration: vc = concatenate_videoclips([vc, vc.copy()])
-        vc = vc.with_duration(ac.duration).with_audio(ac)
+        vc = vc.with_duration(ac.duration)
         if s.get("ost"):
             vc = CompositeVideoClip([vc, ImageClip(ost_img(s["ost"]))
                  .with_duration(min(3,ac.duration)).with_start(ac.duration*0.35).with_position((0,560))])
-        srt.append((t, t+ac.duration, s["narration"])); t += ac.duration
-        vclips.append(vc)
-    title = ImageClip(card_img("SHADOW LEDGER", series)).with_duration(3).with_audio(silence(3))
-    end   = ImageClip(card_img("SUBSCRIBE", "the next ledger opens soon")).with_duration(5).with_audio(silence(5))
-    vid = concatenate_videoclips([title]+vclips+[end])
-    aud = concatenate_videoclips([silence(3)]+acls+[silence(5)])
+        parts.append((vc, ac, s["narration"]))
+    title = (ImageClip(card_img("SHADOW LEDGER", series)).with_duration(3), silence(3), None)
+    end   = (ImageClip(card_img("SUBSCRIBE", "the next ledger opens soon")).with_duration(5), silence(5), None)
+    base = [parts[0], title] + parts[1:]
+    if sp and sp.get("name"):
+        idx = 2 if sp.get("place","").startswith("After") else max(2, len(base)-1)
+        base = base[:idx] + sponsor_blocks(sp, voice, mood) + base[idx:]
+    order = base + [end]
+    vids, auds, srt, markers, t = [], [], [], [], 0.0
+    for vc, ac, txt in order:
+        vids.append(vc.with_audio(ac)); auds.append(ac)
+        if txt:
+            markers.append(t); srt.append((t, t+ac.duration, txt))
+        t += ac.duration
+    vid = concatenate_videoclips(vids)
+    aud = concatenate_videoclips(auds)
+    layers_a = [aud]
     if music:
         mc = AudioFileClip(music); n = int(vid.duration//mc.duration)+1
-        bed = concatenate_videoclips([mc]*n).with_duration(vid.duration).with_volume_scaled(0.12)
-        aud = CompositeVideoClip([]) and aud  # placeholder keep
-        from moviepy import CompositeAudioClip
-        aud = CompositeAudioClip([aud, bed]).with_duration(vid.duration)
-    final = vid.with_audio(aud)
+        layers_a.append(concatenate_videoclips([mc]*n).with_duration(vid.duration).with_volume_scaled(0.10))
+    markers.append(vid.duration*0.68)
+    layers_a.append(sound_bed(vid.duration, markers).with_volume_scaled(0.6))
+    final = vid.with_audio(CompositeAudioClip(layers_a).with_duration(vid.duration))
     layers = [final]
     if os.path.exists(f"{TMP}/bug.png"):
         layers.append(ImageClip(f"{TMP}/bug.png").resized(height=64).with_position((28,28)).with_duration(final.duration))
@@ -138,10 +197,11 @@ def produce(topic, series, pilot, support, music):
                   .with_duration(5).with_start(final.duration*0.68).with_position((76,540))
                   .with_effects([vfx.FadeIn(0.6), vfx.FadeOut(0.8)]))
     final = CompositeVideoClip(layers)
-    out = f"{TMP}/{hashlib.md5(topic.encode()).hexdigest()}.mp4"
+    out = f"{TMP}/episode_{hashlib.md5(topic.encode()).hexdigest()}.mp4"
     final.write_videofile(out, codec="libx264", audio_codec="aac", fps=24, logger=None)
-    return out, sc, srt
-def shorts_cut(video_path, idx=0):
+    return out, srt
+
+def shorts_cut(video_path):
     c = VideoFileClip(video_path).subclipped(3, min(38, VideoFileClip(video_path).duration-6))
     c = c.resized(height=1920); w = c.size[0]
     return c.cropped(x1=(w-1080)//2, x2=(w-1080)//2+1080).with_fps(24)
@@ -165,8 +225,10 @@ def thumbs(topic, hook):
 st.set_page_config(page_title="Shadow Ledger Studio", page_icon="🎬", layout="wide")
 st.title("🎬 SHADOW LEDGER — Digital Hollywood Studio")
 support = st.sidebar.text_input("Support link (Ko-fi)", "https://ko-fi.com/shadowledger")
-music = st.sidebar.file_uploader("House score (one ambient track, reused forever)", type=["mp3","wav"])
-tab1,tab2,tab3,tab4 = st.tabs(["🥚 Golden Egg + Radar","🎬 Production","🖼️ SEO & Publish Pack","📈 Strategy"])
+voice = st.sidebar.text_input("Narrator voice (CosyVoice v2 ID)", "longanyang")
+mood = st.sidebar.selectbox("Narration mood (variety per episode)", list(MOODS))
+music = st.sidebar.file_uploader("House score (optional ambient track)", type=["mp3","wav"])
+tab1,tab2,tab3,tab4 = st.tabs(["🥚 Golden Egg + Radar","🎬 Production","📦 SEO & Publish Pack","📈 Strategy"])
 
 with tab1:
     seeds = st.text_area("Seed topics (one per line)", "Ticketmaster Live Nation monopoly\nBoeing whistleblowers\nBlackRock buying housing\nWeWork collapse")
@@ -183,33 +245,72 @@ with tab2:
     topic = st.text_input("Episode topic", "How Ticketmaster Became the Most Hated Monopoly in America")
     series = st.text_input("Series", "The Monopoly Files · Ep 1")
     pilot = st.checkbox("PILOT MODE (60-90s test render — do this first)", True)
-    if st.button(" Produce episode"):
-        with st.spinner("Writing, voicing, filming, cutting… this is the good part."):
-            out, sc, srt = produce(topic, series, pilot, support,
-                                   music.name if music and hasattr(music,"name") and os.path.exists(music.name) else None)
+    c1, c2 = st.columns(2)
+    if c1.button("📜 Write script (Netflix DNA)"):
+        st.session_state.script = write_script(topic, series)
+        st.session_state.edits = {i: (s["narration"], s["visual"]) for i, s in enumerate(st.session_state.script["scenes"])}
+    if c2.button("🎲 Regenerate new script"):
+        st.session_state.script = write_script(topic, series)
+        st.session_state.edits = {i: (s["narration"], s["visual"]) for i, s in enumerate(st.session_state.script["scenes"])}
+    if st.session_state.get("script"):
+        st.subheader("✂️ Director's Cut — edit any line, then render")
+        for i, s in enumerate(st.session_state.script["scenes"]):
+            nar, vis = st.session_state.edits.get(i, (s["narration"], s["visual"]))
+            st.markdown(f"**Scene {i+1}** · on-screen beat: *{s.get('ost','')}*")
+            nn = st.text_area(f"Narration {i+1}", nar, key=f"n{i}", height=100)
+            vv = st.text_input(f"Visual {i+1}", vis, key=f"v{i}")
+            st.session_state.edits[i] = (nn, vv)
+    with st.expander("💼 Sponsor segment (optional — TV-style break)"):
+        sp_name = st.text_input("Sponsor name", "")
+        sp_script = st.text_area("Sponsor read (you control every word)", "")
+        sp_video = st.file_uploader("Sponsor's own video (optional)", type=["mp4","mov","webm"])
+        sp_place = st.selectbox("Placement", ["After cold open + title (TV style)", "Before the final reveal"])
+    if st.button("🎬 Render episode"):
+        with st.spinner("Voicing, filming, scoring, cutting… this is the good part."):
+            sc = st.session_state.get("script") or write_script(topic, series)
+            for i, s in enumerate(sc["scenes"]):
+                nn, vv = st.session_state.get("edits", {}).get(i, (s["narration"], s["visual"]))
+                s["narration"], s["visual"] = nn, vv
+            mp3 = None
+            if music:
+                mp3 = f"{TMP}/house_{music.name}"; open(mp3,"wb").write(music.getbuffer())
+            sp = None
+            if sp_name.strip():
+                spv = None
+                if sp_video:
+                    spv = f"{TMP}/sponsor_{sp_video.name}"; open(spv,"wb").write(sp_video.getbuffer())
+                sp = {"name": sp_name.strip(), "script": sp_script, "video": spv, "place": sp_place}
+            out, srt = render(sc, topic, series, pilot, mp3, voice, mood, sp)
         st.video(out)
         st.download_button("⬇️ Download episode MP4", open(out,"rb").read(), "episode.mp4")
-        st.session_state.pack = (out, sc, srt)
+        st.session_state.pack = (out, sc, srt, sp_name.strip())
 
 with tab3:
-    if st.button("🖼️ Build SEO + Publish Pack") and st.session_state.get("pack"):
-        out, sc, srt = st.session_state.pack
-        tp = thumbs(st.session_state.get("topic","monopoly"), sc["hook_words"])
-        seo = qwen(f"Topic: {topic}. Support: {support}. Pinned question: {sc['pinned_question']}. "
-                   f"Return JSON {{'title':'<60 chars, curiosity gap, keyword first 40', 'description':'hook line + 3-act synopsis + chapters + support line + 3 hashtags', 'tags':[15], 'shorts_titles':[2]}}")
-        z = io.BytesIO()
-        with zipfile.ZipFile(z,"w") as zf:
-            zf.write(out, "episode.mp4")
-            for j,p in enumerate(tp): zf.write(p, f"thumb_{'AB'[j]}.png")
-            zf.writestr("subtitles.srt", srt_text(srt))
-            zf.writestr("metadata.txt", json.dumps(seo, indent=2))
-            zf.writestr("pinned_comment.txt", sc["pinned_question"] + f"\n☕ Support the investigation: {support}")
-            zf.writestr("community_post.txt", json.dumps(sc["community_poll"]))
-        st.download_button("📦 Download PUBLISH PACK (zip)", z.getvalue(), "publish_pack.zip")
-        st.json(seo)
+    if st.session_state.get("pack"):
+        out, sc, srt, spn = st.session_state.pack
+        hook = st.text_input("Thumbnail hook words (max 4)", sc.get("hook_words",""))
+        if st.button("🖼️ Build SEO + Publish Pack"):
+            tp = thumbs(topic, hook)
+            disc = f" DISCLOSURE: This episode is sponsored by {spn} (paid promotion)." if spn else ""
+            seo = qwen(f"Topic: {topic}. Support: {support}. Pinned question: {sc['pinned_question']}.{disc} "
+                       f"Return JSON {{'title':'<60 chars, curiosity gap, keyword first 40', 'description':'hook line + 3-act synopsis + chapters + support line + disclosure if any + 3 hashtags', 'tags':[15], 'shorts_titles':[2]}}")
+            sp = f"{TMP}/shorts.mp4"; shorts_cut(out).write_videofile(sp, codec="libx264", audio_codec="aac", fps=24, logger=None)
+            z = io.BytesIO()
+            with zipfile.ZipFile(z,"w") as zf:
+                zf.write(out, "episode.mp4"); zf.write(sp, "shorts_cut.mp4")
+                for j,p in enumerate(tp): zf.write(p, f"thumb_{'AB'[j]}.png")
+                zf.writestr("subtitles.srt", srt_text(srt))
+                zf.writestr("metadata.txt", json.dumps(seo, indent=2))
+                zf.writestr("pinned_comment.txt", sc["pinned_question"] + f"\n☕ Support the investigation: {support}")
+                zf.writestr("community_post.txt", json.dumps(sc["community_poll"]))
+            st.download_button("📦 Download PUBLISH PACK (zip)", z.getvalue(), "publish_pack.zip")
+            if spn: st.caption("⚠️ Sponsored episode: tick 'This video contains paid promotion' in YouTube upload settings.")
+            st.json(seo)
 
 with tab4:
-    st.markdown("""**House rules baked in:** bug top-left always · ONE lower-third CTA at 68% · pinned comment
-    + Ko-fi · Shorts funnel · A/B thumbs · community polls · SRT · house score · pattern interrupts.
-    **Phase-2 upgrades (post-proof):** OAuth auto-upload, dubbed audio tracks, analytics feedback loop,
-    memberships + Super Thanks, merch store with the logo.""")
+    st.markdown("""**House DNA in EVERY episode:** cold open → title card → acts → reveal → wound → end card ·
+    emotional CosyVoice (5 moods) · procedural tension score · logo bug · ONE lower-third CTA at 68% ·
+    on-screen beats · SRT · A/B thumbs · pinned comment + Ko-fi · Shorts cut · community poll ·
+    TV-style SPONSOR MODE with disclosure. **Flexible:** script edits, regenerate, visuals, voice, mood,
+    sponsor copy/placement, hook words, pilot/full, house score, support link.
+    **Phase-2:** OAuth auto-upload, dubbed tracks, analytics loop, memberships + Super Thanks, merch.""")
