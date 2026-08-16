@@ -1,8 +1,6 @@
 streamlit
 requests
 dashscope
-Pillow<12
-numpy
 moviepy==2.1.2
 imageio-ffmpeg
 gTTS
