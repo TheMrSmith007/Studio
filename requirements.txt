@@ -3,5 +3,6 @@ requests
 dashscope
 Pillow
 numpy
-moviepy
+moviepy==2.1.2
 imageio-ffmpeg
+edge-tts
