@@ -1,5 +1,5 @@
-import streamlit as st, requests, json, os, io, re, zipfile, hashlib, textwrap
-from datetime import datetime, timedelta
+import streamlit as st, requests, json, os, io, re, zipfile, hashlib, textwrap, asyncio
+from datetime import datetime, timedelta, date
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 import dashscope
@@ -30,6 +30,9 @@ MOODS = {
  "Hushed suspense": "near-whisper, tense, every word a secret, long silences",
  "Hopeful storyteller": "warm, admiring, quietly triumphant, a smile in the voice, still slow and cinematic",
 }
+EDGE_VOICES = {"Calm investigator (default)":"en-US-GuyNeural","Concerned witness":"en-US-AriaNeural",
+ "Grave elegy":"en-US-GuyNeural","Cold expose":"en-US-ChristopherNeural",
+ "Hushed suspense":"en-US-GuyNeural","Hopeful storyteller":"en-US-JennyNeural"}
 ANGLES = {
  "Dark expose (default)": "Tone: dark investigative expose. Dopamine via outrage, justice, revelation.",
  "Mystery / curiosity": "Tone: puzzle-box mystery. Dopamine via curiosity loops and the final click of understanding.",
@@ -38,6 +41,7 @@ ANGLES = {
 }
 TONE_LABEL = {"Dark expose (default)":"A DARK EXPOSE","Mystery / curiosity":"A MYSTERY","David vs Goliath":"AN UNDERDOG STORY","Comeback / positive":"A COMEBACK"}
 LINE_F = f"{TMP}/shadow_line.json"
+SUP_F = f"{TMP}/supporters.json"
 def load_line():
     try:
         if os.path.exists(LINE_F): return json.load(open(LINE_F))
@@ -48,6 +52,13 @@ def save_line(l):
     except Exception: pass
 if "line" not in st.session_state: st.session_state.line = load_line()
 if "edits" not in st.session_state: st.session_state.edits = {}
+if "supporters" not in st.session_state:
+    try: st.session_state.supporters = json.load(open(SUP_F)) if os.path.exists(SUP_F) else []
+    except Exception: st.session_state.supporters = []
+for _it in st.session_state.line:
+    if _it["status"]=="rendered" and not os.path.exists(_it.get("out") or ""):
+        _it["status"]="approved"; _it["err"]="media lost after app reboot — script kept, press render to redo"
+save_line(st.session_state.line)
 
 # ---------------- HOUSE DNA ----------------
 DNA = """You are showrunner of SHADOW LEDGER, a prestige financial documentary series.
@@ -83,10 +94,19 @@ def qwen(prompt, sys=None):
 def wan_video_prompt(v): return (f"{v}. cinematic documentary film still, anamorphic 2.39:1, "
     "35mm grain, low-key chiaroscuro, crushed blacks, gold practicals, teal shadows, slow dolly, no text, no watermark")
 
-# ---------------- GENERATORS ----------------
+# ---------------- GENERATORS (voice can NEVER fail) ----------------
 def speak(text, voice, mood):
-    try: return SpeechSynthesizer(model="cosyvoice-v2", voice=voice, instruction=MOODS[mood]).call(text)
-    except Exception: return SpeechSynthesizer(model="cosyvoice-v2", voice=voice).call(text)
+    for model, instr in (("cosyvoice-v2", MOODS[mood]), ("cosyvoice-v2", None), ("cosyvoice-v1", None)):
+        try:
+            kw = {"model": model, "voice": voice}
+            if instr: kw["instruction"] = instr
+            return SpeechSynthesizer(**kw).call(text)
+        except Exception:
+            continue
+    import edge_tts
+    p = f"{TMP}/edge_{hashlib.md5(text.encode()).hexdigest()}.mp3"
+    asyncio.run(edge_tts.Communicate(text, EDGE_VOICES.get(mood, "en-US-GuyNeural"), rate="-8%").save(p))
+    return open(p, "rb").read()
 def wan_video(prompt):
     r = VideoSynthesis.wait(VideoSynthesis.async_call(model="wan2.1-t2v-turbo", prompt=prompt, size="1280*720"))
     return r.output.video_url
@@ -122,6 +142,19 @@ def dossier(topic, sc):
         "{{'timeline':[6-8 items 'YYYY-MM — event (publicly documented)'], 'key_players':[4-6 'name — role'], "
         "'follow_the_money':[4-6 'number — what it means in human terms'], 'glossary':[4-6 'term — plain-English definition'], "
         "'discussion':[3 questions]}}")
+def schedule_txt(n_start, count):
+    lines = ["SHADOW LEDGER — RELEASE SCHEDULE (US prime-time strategy)",
+      "Rule: consistency beats cleverness. Publish every Friday 16:00 EST (21:00 UTC).",
+      "Shorts teaser: Monday 12:00 EST. Community poll: Wednesday 18:00 EST.",
+      "Upload ALL episodes today, then in YouTube Studio use Schedule per date below.",
+      "Pin the pinned comment at publish; reply to every comment in hour 1.", ""]
+    d = date.today()
+    days_ahead = (4 - d.weekday()) % 7 or 7
+    first = d + timedelta(days=days_ahead)
+    for i in range(count):
+        ep = first + timedelta(weeks=i)
+        lines.append(f"EP {n_start+i:03d} → publish Fri {ep.isoformat()} 16:00 EST (21:00 UTC) · shorts Mon {(ep+timedelta(days=10)).isoformat()} 12:00 EST · poll Wed {(ep-timedelta(days=2)).isoformat()} 18:00 EST")
+    return "\n".join(lines)
 
 # ---------------- YOUTUBE RESEARCH ----------------
 def yt(path, **kw): return requests.get(f"https://www.googleapis.com/youtube/v3/{path}", params={"key":YT, **kw}).json()
@@ -151,7 +184,7 @@ def adsense_scrub(text):
         text = re.sub(rf'\b{bad}\b', good, text, flags=re.IGNORECASE)
     return text
 
-# ---------------- PIL CARDS + CASE FILE PDF ----------------
+# ---------------- PIL CARDS + CASE FILE PDF + CREDITS ----------------
 def card_img(title, sub="", w=1280, h=720, transparent=False):
     img = Image.new("RGBA" if transparent else "RGB", (w,h), (0,0,0,0) if transparent else BLACK)
     d = ImageDraw.Draw(img)
@@ -159,6 +192,15 @@ def card_img(title, sub="", w=1280, h=720, transparent=False):
     d.text((w//2, h//2-30), title, font=F(64), fill=GOLD, anchor="mm")
     if sub: d.text((w//2, h//2+50), sub, font=F(30), fill=(220,220,220), anchor="mm")
     d.rectangle([w//2-260, h//2+95, w//2+260, h//2+98], fill=GOLD)
+    return np.array(img)
+def credits_img(names):
+    img = Image.new("RGB",(1280,720),BLACK); d = ImageDraw.Draw(img)
+    d.rectangle([40,40,1240,680], outline=GOLD, width=2)
+    d.text((640,140), "SUPPORTERS OF THE LEDGER", font=F(56), fill=GOLD, anchor="mm")
+    lines = textwrap.wrap(" · ".join(names), 58)[:4]
+    for k,ln in enumerate(lines):
+        d.text((640,300+k*72), ln, font=F(34), fill=(230,230,230), anchor="mm")
+    d.text((640,630), "thank you for funding independent investigations", font=F(26), fill=(160,160,160), anchor="mm")
     return np.array(img)
 def ost_img(text):
     img = Image.new("RGBA",(1280,160),(0,0,0,0)); d = ImageDraw.Draw(img)
@@ -273,7 +315,7 @@ def sponsor_blocks(sp, voice, mood):
     b.append((ImageClip(card_img("NOW, BACK TO", "the investigation")).with_duration(2.5), silence(2.5), None))
     return b
 
-def render(sc, topic, series, pilot, music, voice, mood, sp=None, prog=None, angle="Dark expose (default)"):
+def render(sc, topic, series, pilot, music, voice, mood, sp=None, prog=None, angle="Dark expose (default)", supporters=None):
     def P(p, t):
         if prog: prog(min(p,1.0), t)
     scenes = sc["scenes"][:4] if pilot else sc["scenes"]
@@ -299,12 +341,13 @@ def render(sc, topic, series, pilot, music, voice, mood, sp=None, prog=None, ang
     title = (ImageClip(card_img("SHADOW LEDGER", f"{series} · {TONE_LABEL.get(angle,'A DARK EXPOSE')}")).with_duration(3), silence(3), None)
     adv = sc.get("advisory") or ""
     advclip = (ImageClip(card_img("VIEWER NOTE", adv)).with_duration(3), silence(3), None) if adv else None
+    cred = (ImageClip(credits_img(supporters)).with_duration(4.5), silence(4.5), None) if supporters else None
     end   = (ImageClip(card_img("SUBSCRIBE", sc.get("share_line") or "the next ledger opens soon")).with_duration(5), silence(5), None)
     base = [parts[0], title] + ([advclip] if advclip else []) + parts[1:]
     if sp and sp.get("name") and sp.get("approved"):
         idx = 2 if sp.get("place","").startswith("After") else max(2, len(base)-1)
         base = base[:idx] + sponsor_blocks(sp, voice, mood) + base[idx:]
-    order = base + [end]
+    order = base + ([cred] if cred else []) + [end]
     vids, auds, srt, markers, t = [], [], [], [], 0.0
     for vc, ac, txt in order:
         vids.append(vc.with_audio(ac)); auds.append(ac)
@@ -365,11 +408,12 @@ CHECKLIST = """YOUTUBE UPLOAD CHECKLIST — SHADOW LEDGER (keep the boss happy)
 [ ] Category: Education or News & Politics
 [ ] License: Standard YouTube License
 [ ] Thumbnail: upload THUMB_A file (test B later via A/B tool)
-[ ] PHASE 2: upload the CASE_FILE pdf to Ko-fi Shop using kofi_product_*.txt listing (already prepared)
+[ ] SCHEDULE: use SCHEDULE.txt dates via YouTube Studio > Schedule
+[ ] PHASE 2: upload the CASE_FILE pdf to Ko-fi Shop using kofi_product_*.txt listing
 """
 RIGHTS = """RIGHTS RECORD — SHADOW LEDGER
 Footage: Pexels-licensed stock video + original AI-generated clips (Wan2.1, Alibaba Model Studio).
-Voice: CosyVoice v2 via licensed API. Music: ORIGINAL procedural score (synthesized in-studio, zero third-party rights).
+Voice: licensed neural TTS APIs. Music: ORIGINAL procedural score (synthesized in-studio, zero third-party rights).
 Sponsor segments: supplied by sponsor or produced with disclosure. Script: original AI-assisted editorial commentary
 on publicly documented events. Case File dossier: original compilation of public-source facts. Brand/logo/cards: original.
 This record supports any copyright or monetization dispute.
@@ -381,7 +425,37 @@ Grab it for $5 (pay-what-you-want): [PASTE YOUR KO-FI SHOP LINK HERE]
 The video stays free forever. Case Files fund the next investigation. Thank you for standing with the ledger.
 """
 
-# ---------------- UI (MISSION CONTROL v17) ----------------
+def pack_entries(it, ep, support, shop, series):
+    entries=[]; sc = it["script"]; sl = slug(it["topic"])
+    tp = thumbs(it["topic"], sc.get("hook_words",""))
+    advline = f" Viewer advisory: {sc['advisory']}" if sc.get("advisory") else ""
+    raw = qwen(f"Topic: {it['topic']}. Support: {support}. Pinned: {sc['pinned_question']}. Binge-pitch: {sc.get('binge_pitch','')}. Share line: {sc.get('share_line','')}.{advline} "
+           f"Add disclaimer: 'Editorial commentary based on public sources; not financial advice.' Mention: full Case File dossier available via shop link. "
+           f"Return JSON {{'title':'<60 chars, no clickbait', 'description':'hook + synopsis + chapters + support + case file line + advisory/disclaimer + 3 hashtags', 'tags':[15], 'shorts_titles':[2]}}")
+    safe = {"title": adsense_scrub(raw["title"]), "description": adsense_scrub(raw["description"]),
+            "tags": [adsense_scrub(t) for t in raw["tags"]], "shorts_titles": [adsense_scrub(t) for t in raw["shorts_titles"]]}
+    spf = f"{TMP}/shorts_{ep}.mp4"; shorts_cut(it["out"]).write_videofile(spf, codec="libx264", audio_codec="aac", fps=24, logger=None)
+    dos = dossier(it["topic"], sc)
+    cfp = f"{TMP}/case_file_{ep}.pdf"; case_file_pdf(it["topic"], series, dos, support, cfp, ep=ep)
+    entries.append((f"EPISODE_{ep}_{sl}.mp4", it["out"], True))
+    entries.append((f"SHORTS_{ep}_{sl}.mp4", spf, True))
+    for j,p in enumerate(tp): entries.append((f"THUMB_{'AB'[j]}_{ep}_{sl}.png", p, True))
+    entries.append(("subtitles.srt", srt_text(it["srt"]).encode(), False))
+    entries.append(("metadata.txt", json.dumps(safe, indent=2).encode(), False))
+    pin = sc["pinned_question"] + f"\n☕ Support the investigation: {support}"
+    if shop: pin += f"\n📄 CASE FILE #{ep} for this episode: {shop}"
+    entries.append(("pinned_comment.txt", pin.encode(), False))
+    entries.append(("community_post.txt", json.dumps(sc["community_poll"]).encode(), False))
+    entries.append((f"CASE_FILE_{ep}_{sl}.pdf", cfp, True))
+    entries.append((f"kofi_product_{ep}.txt",
+        (f"KO-FI PRODUCT LISTING — ready to paste\nProduct name: CASE FILE #{ep} — {it['topic']}\nPrice: $5 (enable pay-what-you-want)\n"
+         f"Type: Digital product\nFile to upload: CASE_FILE_{ep}_{sl}.pdf\nProduct image: THUMB_A_{ep}_{sl}.png\n\nDescription:\n"
+         + SHOP_BLURB.format(topic=f"#{ep} — {it['topic']}")).encode(), False))
+    entries.append(("upload_checklist.txt", CHECKLIST.format(sp=f"YES — {it['sp']} (tick paid promotion + disclose)" if it.get("sp") else "No").encode(), False))
+    entries.append(("rights_record.txt", RIGHTS.encode(), False))
+    return entries, safe
+
+# ---------------- UI (MISSION CONTROL v20) ----------------
 st.set_page_config(page_title="Shadow Ledger Studio", page_icon="🎬", layout="wide")
 st.markdown("""<style>
  .stApp{background:#0b0e13}
@@ -413,6 +487,7 @@ pct = sum(flags.values())/len(order)
 st.title("🎬 SHADOW LEDGER — Mission Control")
 st.markdown("".join(f"<span class='chip {states[k]}'>{'✅ ' if states[k]=='done' else '⭐ ' if states[k]=='now' else '🔒 '}{labels[k]}</span>" for k in order), unsafe_allow_html=True)
 st.progress(pct, text=f"Pipeline {int(pct*100)}% complete")
+st.caption("💡 If a button seems dead for ~3s, the cloud app was waking up — one more click runs the step. Failed steps cost ~zero tokens; only successful generations consume quota.")
 if st.session_state.get("last_fail"):
     st.error(f"⚠️ Last attempt failed at {st.session_state['last_fail']}. Everything BEFORE it is still ✅ complete — press that step's button to retry ONLY it.")
 
@@ -427,7 +502,7 @@ if st.sidebar.button("🔊 Hear 10s voice audition"):
         open(ab,"wb").write(speak("In 2019, a single signature moved forty-one billion dollars. Nobody noticed. Until now.", voice, mood))
         st.sidebar.audio(ab)
     except Exception as e:
-        st.sidebar.error(f"🔇 Audition unavailable right now: {str(e)[:80]} — the full render will retry automatically.")
+        st.sidebar.error(f"🔇 Audition unavailable right now: {str(e)[:80]} — the render uses the free fallback voice automatically.")
 music = st.sidebar.file_uploader("House score (optional)", type=["mp3","wav"])
 series = st.sidebar.text_input("Series brand", "The Monopoly Files")
 adv = balance_advice(line)
@@ -465,7 +540,7 @@ with tab2:
     else:
         st.markdown("## STEP 2 · Tick your slate")
         st.caption("Tick every topic you want queued. The 🏆 winner is pre-ticked.")
-        st.caption("🟢 READY for STEP 2 — tick, then press the gold button once. (If a button seems dead for 3s, the app was still thinking — one more click is safe.)")
+        st.caption("🟢 READY for STEP 2 — tick, then press the gold button once.")
         picks = []
         for j,(t, sc, w) in enumerate(st.session_state.scan):
             if st.checkbox(f"{t}  (🥚 {sc}/100)", value=(j==0), key=f"ck_{t}"): picks.append((t, sc))
@@ -548,10 +623,19 @@ with tab2:
                     nn, vv = st.session_state.edits.get(i2, (s["narration"], s["visual"]))
                     s["narration"], s["visual"] = nn, vv
                 cur["status"] = "approved"; save_line(line)
-                st.success("✅ STEP 5 complete — approved. ➡️ NEXT: optional 💼 SPONSOR SUITE, then STEP 6 Render.")
+                st.success("✅ STEP 5 complete — approved. ➡️ NEXT: optional extras below, then STEP 6 Render.")
         if flags["approve"]:
             st.markdown("## STEP 6 · Render (live progress bar)")
             st.caption("🟢 READY for STEP 6 — renders ONLY the approved episode. Keep this tab open while the bar fills.")
+            with st.expander("🙏 SUPPORTER CREDITS (optional — names appear on a gold card before the end screen)"):
+                sup_txt = st.text_area("Supporter names (one per line — copy from Ko-fi tips)", "\n".join(st.session_state.supporters))
+                cA, cB = st.columns(2)
+                if cA.button("🙏 Attach credits to next render"):
+                    st.session_state.supporters = [x.strip() for x in sup_txt.splitlines() if x.strip()]
+                    json.dump(st.session_state.supporters, open(SUP_F,"w"))
+                    st.success(f"✅ {len(st.session_state.supporters)} supporter(s) will appear in the credits.")
+                if cB.button("🗑️ Clear credits"):
+                    st.session_state.supporters = []; json.dump([], open(SUP_F,"w"))
             itn = next((x for x in line if x["status"]=="approved"), None)
             if itn and itn.get("script"):
                 secs, cost = estimate(itn["script"], pilot)
@@ -566,17 +650,82 @@ with tab2:
                             mp3 = f"{TMP}/house_{music.name}"; open(mp3,"wb").write(music.getbuffer())
                         sp = st.session_state.get("sponsor")
                         it["sp"] = sp["name"] if (sp and sp.get("approved")) else ""
-                        out, srt = render(it["script"], it["topic"], series, pilot, mp3, voice, mood, sp, prog=bar.progress, angle=it.get("angle") or "Dark expose (default)")
+                        sups = st.session_state.supporters or None
+                        out, srt = render(it["script"], it["topic"], series, pilot, mp3, voice, mood, sp, prog=bar.progress, angle=it.get("angle") or "Dark expose (default)", supporters=sups)
                         it["out"], it["srt"], it["status"], it["err"] = out, srt, "rendered", ""
                         save_line(line)
                         st.session_state.last_fail = None
                         st.video(out)
                         st.download_button("⬇️ Download this episode", open(out,"rb").read(), f"EPISODE_{ep_num}_{slug(it['topic'])}.mp4")
-                        st.success("✅ STEP 6 complete — rendered successfully. ➡️ NEXT: 📦 3·PUBLISH tab.")
+                        st.success("✅ STEP 6 complete — rendered successfully. ➡️ NEXT: downloads below or 📦 3·PUBLISH tab.")
                     except Exception as e:
                         it["status"], it["err"] = "failed", str(e)[:150]; save_line(line)
                         st.session_state.last_fail = "STEP 6 (Render)"
                         st.error(f"Render failed (line saved — press Render to retry ONLY this step): {e}")
+            st.markdown("### 🎬 SERIES MODE — render EVERYTHING left in the line (resumes automatically)")
+            st.caption("One click: scripts, gates and renders ALL remaining episodes in order, with a ✅ message after each. If it cuts out, press again — completed episodes are skipped. Plug in the charger, keep the tab open.")
+            if st.button("🎬 RENDER ENTIRE LINE (resume-safe)"):
+                todo = [x for x in line if x["status"] != "rendered"]
+                done_n = len(line) - len(todo)
+                if done_n: st.info(f"♻️ Resuming: {done_n} episode(s) already complete — continuing with the rest.")
+                if not todo: st.success("🏁 Nothing left to render — all episodes complete. Download below.")
+                mp3 = None
+                if music:
+                    mp3 = f"{TMP}/house_{music.name}"; open(mp3,"wb").write(music.getbuffer())
+                sp = st.session_state.get("sponsor")
+                sups = st.session_state.supporters or None
+                bar = st.progress(0.0, text="Starting series batch…")
+                for k, it in enumerate(todo):
+                    try:
+                        bar.progress(k/max(len(todo),1), text=f"EP {k+1}/{len(todo)} · {it['topic'][:30]} — scripting…")
+                        if not it["script"]:
+                            it["angle"] = it.get("angle") or angle
+                            it["script"] = write_script(it["topic"], series, it["angle"])
+                            try:
+                                g = quality_gate(it["topic"], it["script"]); it["script"] = apply_gate(it["script"], g); it["gate"] = g
+                            except Exception: pass
+                        it["sp"] = sp["name"] if (sp and sp.get("approved")) else ""
+                        bar.progress((k+0.4)/max(len(todo),1), text=f"EP {k+1}/{len(todo)} · {it['topic'][:30]} — rendering…")
+                        out, srt = render(it["script"], it["topic"], series, pilot, mp3, voice, mood, sp, angle=it.get("angle") or "Dark expose (default)", supporters=sups)
+                        it["out"], it["srt"], it["status"], it["err"] = out, srt, "rendered", ""
+                        save_line(line)
+                        st.success(f"✅ EP {k+1}/{len(todo)} — **{it['topic']}** complete. {'Starting next…' if k+1<len(todo) else 'Series finished!'}")
+                    except Exception as e:
+                        it["status"], it["err"] = "failed", str(e)[:120]; save_line(line)
+                        st.error(f"⚠️ EP {k+1} failed ({str(e)[:80]}) — continuing with the next episode.")
+                bar.progress(1.0, text="Batch finished — download your series below, one file at a time.")
+        rendered = [i for i in line if i["status"]=="rendered" and i["out"] and os.path.exists(i["out"])]
+        if rendered:
+            st.markdown("### 📥 SERIES DOWNLOADS — one at a time (keeps every download small & resumable)")
+            base_n = int(ep_num)
+            for i2, it in enumerate(rendered):
+                ep = f"{base_n+i2:03d}"; sl = slug(it["topic"])
+                st.markdown(f"**EP {ep} · {it['topic']}**")
+                c1, c2, c3 = st.columns(3)
+                c1.download_button("⬇️ Episode MP4", open(it["out"],"rb").read(), f"EPISODE_{ep}_{sl}.mp4", key=f"dl_{ep}")
+                if c2.button(f"📦 Build EP {ep} pack", key=f"pk_{ep}"):
+                    entries, safe = pack_entries(it, ep, support, shop, series)
+                    z = io.BytesIO()
+                    with zipfile.ZipFile(z,"w") as zf:
+                        for name, data, is_path in entries:
+                            if is_path: zf.write(data, name)
+                            else: zf.writestr(name, data)
+                    st.session_state[f"packzip_{ep}"] = z.getvalue()
+                if st.session_state.get(f"packzip_{ep}"):
+                    c3.download_button("⬇️ EP pack zip", st.session_state[f"packzip_{ep}"], f"SHADOW_LEDGER_PACK_{ep}.zip", key=f"dlz_{ep}")
+            if st.button("📄 SERIES PAPERWORK (schedule + guides + subtitles + comments — tiny zip)"):
+                z = io.BytesIO()
+                with zipfile.ZipFile(z,"w") as zf:
+                    zf.writestr("SCHEDULE.txt", schedule_txt(base_n, len(rendered)).encode())
+                    zf.writestr("SERIES_GUIDE.txt", ("Upload ALL episodes today as Private/Scheduled.\nYouTube Studio: Content → each video → Visibility → Schedule → use SCHEDULE.txt dates.\nConsistency (every Friday 16:00 EST) trains the algorithm and your audience.\nReply to every comment in hour 1. Post the community poll Wednesday before each Friday drop.").encode())
+                    for i3, it in enumerate(rendered):
+                        ep = f"{base_n+i3:03d}"
+                        zf.writestr(f"EP{ep}/subtitles.srt", srt_text(it["srt"]).encode())
+                        zf.writestr(f"EP{ep}/pinned_comment.txt", (it["script"]["pinned_question"] + f"\n☕ Support the investigation: {support}").encode())
+                        zf.writestr(f"EP{ep}/community_post.txt", json.dumps(it["script"]["community_poll"]).encode())
+                st.session_state.paper = z.getvalue()
+            if st.session_state.get("paper"):
+                st.download_button("⬇️ Download SERIES PAPERWORK zip", st.session_state["paper"], "SHADOW_LEDGER_SERIES_PAPERWORK.zip")
     st.download_button("💾 Backup production line", json.dumps(line).encode(), "shadow_line.json")
     up = st.file_uploader("Restore backup", type=["json"])
     if up: st.session_state.line = json.load(up); save_line(st.session_state.line)
@@ -616,60 +765,32 @@ with tabS:
             st.warning("Enter a sponsor name first.")
 
 with tab3:
-    rendered = [i for i in line if i["status"]=="rendered" and i["out"]]
+    rendered = [i for i in line if i["status"]=="rendered" and i["out"] and os.path.exists(i["out"])]
     if not rendered:
-        st.warning("⬅️ Render an episode first (🏭 2·PRODUCE → STEP 6).")
+        st.warning("⬅️ Render an episode first (🏭 2·PRODUCE → STEP 6 or SERIES MODE).")
     else:
         st.markdown("## STEP 7 · Build the Publish Pack (auto-numbered, shop-ready)")
         st.caption("🟢 READY for STEP 7 — builds the numbered pack in one press.")
         choice = st.selectbox("Episode to pack", [i["topic"] for i in rendered])
         it = rendered[[i["topic"] for i in rendered].index(choice)]
-        sl = slug(it["topic"])
-        hook = st.text_input("Thumbnail hook words (max 4)", it["script"].get("hook_words",""))
         if st.button("📦 STEP 7 · Build SEO + Publish Pack + Case File"):
-            tp = thumbs(it["topic"], hook)
-            sc = it["script"]
-            advline = f" Viewer advisory: {sc['advisory']}" if sc.get("advisory") else ""
-            raw = qwen(f"Topic: {it['topic']}. Support: {support}. Pinned: {sc['pinned_question']}. Binge-pitch: {sc.get('binge_pitch','')}. Share line: {sc.get('share_line','')}.{advline} "
-                   f"Add disclaimer: 'Editorial commentary based on public sources; not financial advice.' Mention: full Case File dossier available via shop link. "
-                   f"Return JSON {{'title':'<60 chars, no clickbait', 'description':'hook + synopsis + chapters + support + case file line + advisory/disclaimer + 3 hashtags', 'tags':[15], 'shorts_titles':[2]}}")
-            safe = {"title": adsense_scrub(raw["title"]), "description": adsense_scrub(raw["description"]),
-                    "tags": [adsense_scrub(t) for t in raw["tags"]], "shorts_titles": [adsense_scrub(t) for t in raw["shorts_titles"]]}
-            spf = f"{TMP}/shorts.mp4"; shorts_cut(it["out"]).write_videofile(spf, codec="libx264", audio_codec="aac", fps=24, logger=None)
-            dos = dossier(it["topic"], sc)
-            cfp = f"{TMP}/case_file_{ep_num}.pdf"; case_file_pdf(it["topic"], series, dos, support, cfp, ep=ep_num)
+            entries, safe = pack_entries(it, ep_num, support, shop, series)
             z = io.BytesIO()
             with zipfile.ZipFile(z,"w") as zf:
-                zf.write(it["out"], f"EPISODE_{ep_num}_{sl}.mp4")
-                zf.write(spf, f"SHORTS_{ep_num}_{sl}.mp4")
-                for j,p in enumerate(tp): zf.write(p, f"THUMB_{'AB'[j]}_{ep_num}_{sl}.png")
-                zf.writestr("subtitles.srt", srt_text(it["srt"]))
-                zf.writestr("metadata.txt", json.dumps(safe, indent=2))
-                pin = sc["pinned_question"] + f"\n☕ Support the investigation: {support}"
-                if shop: pin += f"\n📄 CASE FILE #{ep_num} for this episode: {shop}"
-                zf.writestr("pinned_comment.txt", pin)
-                zf.writestr("community_post.txt", json.dumps(sc["community_poll"]))
-                zf.writestr(f"CASE_FILE_{ep_num}_{sl}.pdf", open(cfp,"rb").read())
-                zf.writestr(f"kofi_product_{ep_num}.txt",
-                    f"KO-FI PRODUCT LISTING — ready to paste\n"
-                    f"Product name: CASE FILE #{ep_num} — {it['topic']}\n"
-                    f"Price: $5 (enable pay-what-you-want)\n"
-                    f"Type: Digital product\n"
-                    f"File to upload: CASE_FILE_{ep_num}_{sl}.pdf\n"
-                    f"Product image: THUMB_A_{ep_num}_{sl}.png\n\n"
-                    f"Description:\n" + SHOP_BLURB.format(topic=f"#{ep_num} — {it['topic']}"))
-                zf.writestr("upload_checklist.txt", CHECKLIST.format(sp=f"YES — {it['sp']} (tick paid promotion + disclose)" if it.get("sp") else "No"))
-                zf.writestr("rights_record.txt", RIGHTS)
+                for name, data, is_path in entries:
+                    if is_path: zf.write(data, name)
+                    else: zf.writestr(name, data)
             st.session_state.packed = True
             st.session_state.last_fail = None
             st.download_button("📦 Download PUBLISH PACK (zip)", z.getvalue(), f"SHADOW_LEDGER_PACK_{ep_num}.zip")
-            st.success(f"✅ STEP 7 complete — EP#{ep_num} pack ready: numbered episode, shorts, thumbs, Case File PDF + Ko-fi listing. 🏁")
+            st.success(f"✅ STEP 7 complete — EP#{ep_num} pack ready. 🏁")
             st.json(safe)
 
 with tab4:
-    st.markdown("""**v17 MISSION CONTROL.** Fixes: international voice websocket (no more 5s timeout) · crash-proof auditions ·
-    ✅/⭐/🔒 step chips · READY captions · retry-only-failed-step banner. Pipeline: scan → slate → series →
-    script+Gate+Guard → Director's Cut → render → auto-numbered shop-ready pack (CASE_FILE_###, THUMB_###,
-    kofi_product_###). **PHASED REVENUE:** ☕ tips now · 📄 Case Files $5 next · 📚 affiliates later · 💼 sponsors +
-    memberships + merch. Core video FREE forever; supporters buy depth & belonging. **Roadmap:** PWA → native app →
+    st.markdown("""**v20 MISSION CONTROL.** SERIES MODE now talks to you (✅ EP 1 done → starting EP 2…), skips finished
+    episodes on resume, continues past failures, and downloads in SMALL PARTS (per-episode MP4, per-episode pack on
+    demand, tiny paperwork zip with SCHEDULE.txt Fridays-16:00-EST plan). Voice can never fail (DashScope chain → free
+    neural fallback). Plus: 🙏 supporter credits, 💼 Sponsor Suite, ✅/⭐/🔒 chips, READY captions, retry-only-failed,
+    auto-numbered shop-ready packs, Gate + YouTube Guard, rights record + checklist. **PHASED REVENUE:** ☕ tips now ·
+    📄 Case Files $5 next · 📚 affiliates later · 💼 sponsors + memberships + merch. **Roadmap:** PWA → native app →
     OAuth upload → dubs → analytics loop.""")
