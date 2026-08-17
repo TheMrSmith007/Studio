@@ -1,6 +1,8 @@
 streamlit
 requests
+dashscope
+edge-tts
+gTTS
 moviepy==2.1.2
 imageio-ffmpeg
-gTTS
 pillow==10.4.0
