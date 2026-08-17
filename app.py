@@ -158,7 +158,7 @@ def normalize_tts(t):
     return t
 def mood_for(i): return MOOD_ROT[i%len(MOOD_ROT)]
 
-# ---------------- OAUTH + YOUTUBE + DRIVE (all ON-DEMAND, never at boot) ----------------
+# ---------------- OAUTH + YOUTUBE + DRIVE (on-demand) ----------------
 YT_ONLY="https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube https://www.googleapis.com/auth/yt-analytics.readonly"
 FULL=YT_ONLY+" https://www.googleapis.com/auth/drive.file"
 def yt_auth_url(scopes=FULL):
@@ -260,7 +260,10 @@ def queue_topic(t,sc,tag):
     line=load_line()
     if t and not any(i["topic"]==t for i in line):
         line.append({"topic":t,"score":sc,"tag":tag,"status":"queued","script":None,"gate":None,"out":None,"srt":None,"err":"","angle":None,"sp":""})
-        save_line(line); decide(f"Queued '{t[:40]}' ({tag}, 🥚 {sc})."); return True
+        save_line(line)
+        try: decide(f"Queued '{t[:40]}' ({tag}, score {sc}).")
+        except Exception: pass
+        return True
     return False
 
 # ---------------- BIBLE/HOF/DNA/GATE ----------------
@@ -649,7 +652,7 @@ def render(sc,topic,series,pilot,music,voice,mood,sp=None,angle="Dark expose (de
     base=[parts[0],title]+([advclip] if advclip else [])+parts[1:]
     if sp and sp.get("name") and sp.get("approved"):
         idx=2 if sp.get("place","").startswith("After") else max(2,len(base)-1)
-        base=base[:idx]+sponsor_blocks(sp,voice,mood)+base[idx:]
+    base=base[:idx]+sponsor_blocks(sp,voice,mood)+base[idx:] if (sp and sp.get("name") and sp.get("approved")) else base
     order=base+([cred] if cred else [])+[end]
     vids,auds,srt,markers,t=[],[],[],[],0.0
     for vc,ac,txt in order:
@@ -811,7 +814,7 @@ def revenue_forecast():
     tot=mk+mc+my
     return {"subs":r*80,"hrs":r*40,"yt_ready":(r*80>=1000 and r*40>=4000),"usd":tot,"zar":tot*18.5,"target":tot*18.5>=100000}
 
-# ---------------- UI (v44 — zero network at boot) ----------------
+# ---------------- UI (v45) ----------------
 st.set_page_config(page_title="Shadow Ledger Studio",page_icon="🎬",layout="wide")
 st.markdown("""<style>
  .stApp{background:radial-gradient(1200px 600px at 80% -10%,#14304f66,transparent),linear-gradient(180deg,#070d18,#0b1526 60%,#081020);}
@@ -991,8 +994,12 @@ with tab1:
     with st.expander("🎯 Hunt 80+ engine"):
         ht=st.text_input("Theme to hunt","global financial scandals, monopolies, comebacks")
         hm=st.number_input("Min score",50,100,80,5)
-        if st.button("🎯 HUNT HIGH SCORERS"): st.session_state["hunt_res"]=hunt(ht,int(hm))
-        for t,sc,why in st.session_state.get("hunt_res",[]):
+        if st.button("🎯 HUNT HIGH SCORERS"):
+            try: st.session_state["hunt_res"]=hunt(ht,int(hm))
+            except Exception as e: st.error(f"Hunt hiccup: {str(e)[:100]}")
+        hr=st.session_state.get("hunt_res",[])
+        if hr==[]: st.caption("No topics at that score — lower Min score or broaden the theme. Results appear just below.")
+        for t,sc,why in hr:
             st.markdown(f"**🔥 {t}** — 🥚 {sc}/100")
             if st.button(f"➕ Queue {t[:40]}",key=f"hq_{t}"): queue_topic(t,sc,"HUNTED")
     with st.expander("🔮 Trend Anticipation"):
@@ -1034,10 +1041,13 @@ with tab2:
             else: st.warning("⬅️ Add topics first in 🥚 1·SCAN.")
         if st.session_state.get("splan"):
             spn=st.session_state.splan
-            st.markdown(f"**Verdict:** {'✅ series' if spn['series'] else '❌ standalone'} — {spn['why']}")
-            if spn["series"] and st.button("➕ ADD SERIES"):
-                for e in spn.get("episodes",[]): queue_topic(e,line[0]["score"],"SERIES")
+            st.markdown(f"**Verdict:** {'✅ series' if spn.get('series') else '❌ standalone'} — {spn.get('why','')}")
+            if spn.get("series") and st.button("➕ ADD SERIES"):
+                base_sc=(line[0].get("score",60) if line else 60)
+                for e in spn.get("episodes",[]): queue_topic(e,base_sc,"SERIES")
                 st.session_state.series_checked=True
+                st.session_state.line=load_line()
+                st.success("✅ Series added to line.")
         if flags["series"]:
             st.markdown("## 6️⃣ STEP 4 · Script + Gate")
             if any(i["status"]=="queued" for i in line):
@@ -1129,8 +1139,7 @@ with tab4:
     rf=revenue_forecast()
     st.markdown(f"**Projected:** ${rf['usd']:.0f}/mo ≈ R{rf['zar']:.0f} · Subs ~{rf['subs']} · {'✅ YPP-ready' if rf['yt_ready'] else '⏳ building'}")
     if rf["target"]: st.success("🏆 R100k/month TARGET REACHED")
-    st.markdown("""**v44 — ZERO NETWORK AT BOOT (no more endless loading).** Startup now reads only local files (instant).
-    Google/Drive calls happen ONLY when you press Connect / Recover / Backup / Restore, or during background render+upload.
-    Keeps: broadcast-grade normalized voice, best-model-first TTS, all stability guards, Vault (on-demand), immunity,
-    live ops, history, smart schedule, PRESTIGE, Pilot, Hunt, Anticipation, analytics, Hall of Fame, dubs, sponsor,
-    forecast. **It loads fast, speaks human, and publishes itself.** 🎬""")
+    st.markdown("""**v45 — ALL CRASH-PROOF.** Series button, Hunt, and queueing are now guarded (no more KeyError/IndexError).
+    Keeps: zero-network boot, broadcast-grade normalized voice, best-model-first TTS, Vault on-demand, immunity, live
+    ops, history, smart schedule, PRESTIGE, Pilot, Hunt, Anticipation, analytics, Hall of Fame, dubs, sponsor, forecast.
+    **Stable, human-voiced, self-publishing.** Commit, reboot, render, sleep. 🎬""")
