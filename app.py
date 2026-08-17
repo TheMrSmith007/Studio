@@ -1,7 +1,7 @@
 import warnings
 warnings.filterwarnings("ignore")
 import socket
-socket.setdefaulttimeout(30)
+socket.setdefaulttimeout(20)
 import streamlit as st, requests, json, os, io, re, zipfile, hashlib, textwrap, time, base64, threading
 from datetime import datetime, timedelta, date
 import numpy as np
@@ -27,7 +27,7 @@ except Exception:
         from moviepy import concatenate_audioclips
 import moviepy.video.fx as vfx
 
-# ---------------- CONFIG (tolerant secret names) ----------------
+# ---------------- CONFIG ----------------
 DASH, YT, PEX = st.secrets["DASHSCOPE_API_KEY"], st.secrets["YOUTUBE_API_KEY"], st.secrets["PEXELS_API_KEY"]
 YTC_ID = st.secrets.get("YOUTUBE_CLIENT_ID") or st.secrets.get("YOUTUBE_Client_ID") or ""
 YTC_SEC = st.secrets.get("YOUTUBE_CLIENT_SECRET") or st.secrets.get("YOUTUBE_Client_SECRET") or ""
@@ -66,6 +66,13 @@ def load_seeds():
 def save_seeds(t): jsave(SEEDS_F,[x for x in t.splitlines() if x.strip()])
 def cred_load(): return jload(CRED_F,{"loaded_zar":0})
 def cred_save(d): jsave(CRED_F,d)
+DAYS=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"]
+def occ(day_name,hhmm,add_days=0,weeks=0):
+    target=DAYS.index(day_name); d=date.today()
+    delta=(target-d.weekday())%7
+    dt=d+timedelta(days=delta+add_days+7*weeks)
+    hh,mm=[int(x) for x in (hhmm or "21:00").split(":")]
+    return datetime(dt.year,dt.month,dt.day,hh,mm).strftime("%Y-%m-%dT%H:%M:00Z")
 def ramp_advisor():
     line=load_line(); n=len([i for i in line if i["status"]=="rendered"])
     met=jload(MET_F,{}); ctrs=[float(m.get("ctr") or 0) for m in met.values() if m.get("ctr")]
@@ -112,7 +119,7 @@ MOOD_ROT=list(MOODS.keys())
 ANGLES={"Dark expose (default)":"Tone: dark investigative expose.","Mystery / curiosity":"Tone: puzzle-box mystery.","David vs Goliath":"Tone: underdog versus a financial giant.","Comeback / positive":"Tone: triumphant human comeback."}
 TONE_LABEL={"Dark expose (default)":"A DARK EXPOSE","Mystery / curiosity":"A MYSTERY","David vs Goliath":"AN UNDERDOG STORY","Comeback / positive":"A COMEBACK"}
 
-# ---------------- OAUTH + YOUTUBE + DRIVE (fail-safe) ----------------
+# ---------------- OAUTH + YOUTUBE + DRIVE ----------------
 YT_ONLY="https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube https://www.googleapis.com/auth/yt-analytics.readonly"
 FULL=YT_ONLY+" https://www.googleapis.com/auth/drive.file"
 def yt_auth_url(scopes=FULL):
@@ -123,34 +130,28 @@ def yt_connect(code):
     jsave(YT_TOK_F,{"token":r["access_token"],"refresh":r.get("refresh_token"),"cid":YTC_ID,"csec":YTC_SEC})
     return r.get("refresh_token","")
 def _creds():
-    try:
-        from google.oauth2.credentials import Credentials
-        tok=jload(YT_TOK_F,None)
-        if tok: c=Credentials(token=tok.get("token"),refresh_token=tok.get("refresh"),client_id=tok.get("cid"),client_secret=tok.get("csec"),token_uri="https://oauth2.googleapis.com/token")
-        elif YT_RT and YTC_ID and YTC_SEC: c=Credentials(token=None,refresh_token=YT_RT,client_id=YTC_ID,client_secret=YTC_SEC,token_uri="https://oauth2.googleapis.com/token")
-        else: return None
-        if not c.valid and c.refresh_token:
-            try:
-                from google.auth.transport.requests import Request
-                c.refresh(Request()); jsave(YT_TOK_F,{"token":c.token,"refresh":c.refresh_token,"cid":YTC_ID,"csec":YTC_SEC})
-            except Exception:
-                return None
-        return c
-    except Exception:
-        return None
+    from google.oauth2.credentials import Credentials
+    tok=jload(YT_TOK_F,None)
+    if tok: c=Credentials(token=tok.get("token"),refresh_token=tok.get("refresh"),client_id=tok.get("cid"),client_secret=tok.get("csec"),token_uri="https://oauth2.googleapis.com/token")
+    elif YT_RT and YTC_ID and YTC_SEC: c=Credentials(token=None,refresh_token=YT_RT,client_id=YTC_ID,client_secret=YTC_SEC,token_uri="https://oauth2.googleapis.com/token")
+    else: return None
+    if not c.valid and c.refresh_token:
+        try:
+            from google.auth.transport.requests import Request
+            c.refresh(Request()); jsave(YT_TOK_F,{"token":c.token,"refresh":c.refresh_token,"cid":YTC_ID,"csec":YTC_SEC})
+        except Exception:
+            return None
+    return c
 def yt_service(kind="youtube"):
-    try:
-        from googleapiclient.discovery import build
-        c=_creds()
-        if not c: return None
-        return build(kind,"v3" if kind=="youtube" else "v2",credentials=c)
-    except Exception: return None
+    from googleapiclient.discovery import build
+    c=_creds()
+    if not c: return None
+    return build(kind,"v3" if kind=="youtube" else "v2",credentials=c)
 def drive_service():
-    try:
-        from googleapiclient.discovery import build
-        c=_creds()
-        if not c: return None
-        return build("drive","v3",credentials=c)
+    from googleapiclient.discovery import build
+    c=_creds()
+    if not c: return None
+    try: return build("drive","v3",credentials=c)
     except Exception: return None
 VAULT="Shadow Ledger Vault"
 def _vault_fid():
@@ -162,20 +163,20 @@ def _vault_fid():
         return d.files().create(body={"name":VAULT,"mimeType":"application/vnd.google-apps.folder"}).execute()["id"]
     except Exception: return None
 def drive_upsert(name,text,fid):
+    from googleapiclient.http import MediaIoBaseUpload
+    d=drive_service()
+    if not d or not fid: return
     try:
-        from googleapiclient.http import MediaIoBaseUpload
-        d=drive_service()
-        if not d or not fid: return
         q=d.files().list(q=f"name='{name}' and '{fid}' in parents and trashed=false",fields="files(id)").execute()
         media=MediaIoBaseUpload(io.BytesIO(text.encode()),mimetype="application/json",resumable=False)
         if q["files"]: d.files().update(fileId=q["files"][0]["id"],media_body=media).execute()
         else: d.files().create(body={"name":name,"parents":[fid]},media_body=media).execute()
     except Exception: pass
 def drive_read(name,fid):
+    from googleapiclient.http import MediaIoBaseDownload
+    d=drive_service()
+    if not d or not fid: return None
     try:
-        from googleapiclient.http import MediaIoBaseDownload
-        d=drive_service()
-        if not d or not fid: return None
         q=d.files().list(q=f"name='{name}' and '{fid}' in parents and trashed=false",fields="files(id)").execute()
         if not q["files"]: return None
         fh=io.BytesIO(); req=d.files().get_media(fileId=q["files"][0]["id"])
@@ -230,12 +231,6 @@ def queue_topic(t,sc,tag):
         save_line(line); decide(f"Queued '{t[:40]}' ({tag}, 🥚 {sc})."); return True
     return False
 def mood_for(i): return MOOD_ROT[i%len(MOOD_ROT)]
-def friday_for(i):
-    d=date.today(); da=(4-d.weekday())%7 or 7
-    return (d+timedelta(days=da+7*i)).isoformat()+"T21:00:00Z"
-def monday_for(i):
-    d=date.today(); da=(0-d.weekday())%7 or 7
-    return (d+timedelta(days=da+7*i)).isoformat()+"T17:00:00Z"
 
 # ---------------- BIBLE/HOF/DNA/GATE ----------------
 def bible_txt():
@@ -334,9 +329,7 @@ def wan_images(prompt,n=2):
                         if u: return u
         except Exception: continue
     raise RuntimeError("image models failed")
-def pexels_clip(q):
-    try: return requests.get("https://api.pexels.com/videos/search",headers={"Authorization":PEX},params={"query":q,"per_page":5}).json()["videos"][0]["video_files"][0]["link"]
-    except Exception: raise RuntimeError("pexels failed")
+def pexels_clip(q): return requests.get("https://api.pexels.com/videos/search",headers={"Authorization":PEX},params={"query":q,"per_page":5}).json()["videos"][0]["video_files"][0]["link"]
 def fetch(u,n):
     p=f"{TMP}/{n}"; open(p,"wb").write(requests.get(u).content); return p
 def estimate(sc,pilot):
@@ -378,14 +371,9 @@ def hunt(theme,min_score=80,n=5):
         except Exception: pass
     out.sort(key=lambda x:-x[1]); return out[:n]
 def trend_radar(seed):
-    try:
-        sug=requests.get("https://suggestqueries.google.com/complete/search",params={"client":"youtube","q":seed}).json()[1]
-    except Exception: sug=[]
-    try:
-        wk=yt("search",part="snippet",q=seed,type="video",order="viewCount",publishedAfter=(datetime.utcnow()-timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ"),maxResults=5)
-        vel=[i["snippet"]["title"][:40] for i in wk.get("items",[])]
-    except Exception: vel=[]
-    return [s[0] if isinstance(s,list) else s for s in sug],vel
+    sug=requests.get("https://suggestqueries.google.com/complete/search",params={"client":"youtube","q":seed}).json()[1]
+    wk=yt("search",part="snippet",q=seed,type="video",order="viewCount",publishedAfter=(datetime.utcnow()-timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ"),maxResults=5)
+    return [s[0] if isinstance(s,list) else s for s in sug],[i["snippet"]["title"][:40] for i in wk.get("items",[])]
 def predict_spikes(seed):
     sug,vel=trend_radar(seed); out=[]
     for s in sug[:8]:
@@ -678,8 +666,9 @@ def thumbs(topic,hook):
         d.text((70,600),hook.upper(),font=F(92),fill=GOLD,stroke_width=6,stroke_fill=(0,0,0))
         p=f"{TMP}/thumb_{j}.png"; img.save(p); ps.append(p)
     return ps
-CHECKLIST="YOUTUBE CHECKLIST — SHADOW LEDGER\n[ ] NOT made for kids\n[ ] Paid promotion: {sp}\n[ ] AdSense-scrubbed metadata\n[ ] Subtitles.srt\n[ ] End screen + cards\n[ ] Pin pinned_comment\n[ ] THUMB A/B\n[ ] Shorts Mon/Wed\n[ ] TikTok/Reels same day\n[ ] Schedule Fridays 16:00 EST\n"
+CHECKLIST="YOUTUBE CHECKLIST — SHADOW LEDGER\n[ ] NOT made for kids\n[ ] Paid promotion: {sp}\n[ ] AdSense-scrubbed metadata\n[ ] Subtitles.srt\n[ ] End screen + cards\n[ ] Pin pinned_comment\n[ ] THUMB A/B\n[ ] Shorts on your chosen days\n[ ] TikTok/Reels same day\n[ ] Schedule per your chosen day/time\n"
 RIGHTS="RIGHTS RECORD — original AI-assisted editorial; Pexels stock; licensed neural TTS; original procedural score; Case Files original compilation.\n"
+SHOP_BLURB="📄 THE CASE FILE — {topic}\nFull dossier: timeline, players, money, glossary, discussion. $5 pay-what-you-want.\n"
 def pack_entries(it,ep,support,shop,series,do_shorts3=True,do_dubs=False):
     entries=[]; sc=it["script"]; sl=slug(it["topic"]); extra={"shorts":[],"tiktok":None}
     tp=thumbs(it["topic"],sc.get("hook_words",""))
@@ -705,10 +694,12 @@ def pack_entries(it,ep,support,shop,series,do_shorts3=True,do_dubs=False):
     entries.append(("rights_record.txt",RIGHTS.encode(),False))
     return entries,safe,extra
 
-# ---------------- BACKGROUND WORKER (live ops + history) ----------------
+# ---------------- BACKGROUND WORKER (live ops + history + flexible schedule) ----------------
 def batch_worker(topics=None,auto_upload=False,auto_schedule=True,auto_feed=False):
     JOB=job_load(); JOB["running"]=True; JOB["log"]=[]; job_save(JOB)
     S=jload(SET_F,{})
+    ep_day=S.get("ep_day","Friday"); ep_time=S.get("ep_time","21:00")
+    sh_day=S.get("sh_day","Monday"); sh_time=S.get("sh_time","17:00")
     line=load_line()
     todo=[x for x in line if (not topics) or x["topic"] in topics]
     todo=[x for x in todo if x["status"] not in ("rendered","rejected")]
@@ -735,14 +726,17 @@ def batch_worker(topics=None,auto_upload=False,auto_schedule=True,auto_feed=Fals
                 try:
                     raw=qwen(f"Topic: {it['topic']}. Return JSON {{'title':'','description':'','tags':[15],'shorts_titles':[2]}}")
                     safe={"title":adsense_scrub(raw["title"]),"description":adsense_scrub(raw["description"]),"tags":[adsense_scrub(t) for t in raw["tags"]],"shorts_titles":[adsense_scrub(t) for t in raw["shorts_titles"]]}
-                    when=friday_for(idx) if auto_schedule else None
+                    when=occ(ep_day,ep_time,weeks=idx) if auto_schedule else None
                     vid=yt_upload(out,safe["title"],safe["description"],safe["tags"],when=when)
                     if vid:
                         it["yt_id"]=vid
-                        JOB["log"].append(f"☁️ Uploaded {'scheduled' if when else 'private'}: {vid}")
+                        JOB["log"].append(f"☁️ Uploaded {'scheduled '+when if when else 'private'}: {vid}")
                         hooks=(safe["shorts_titles"]+[it["script"].get("share_line","FOLLOW THE MONEY")])[:3]
                         for k,p in enumerate(shorts_three(out,hooks,f"{idx+1:03d}")):
-                            try: yt_upload(p,(safe["shorts_titles"][k] if k<len(safe["shorts_titles"]) else "Follow the money")+" #shorts","Full film on Shadow Ledger.",["shorts","finance"])
+                            try:
+                                sw=occ(sh_day,sh_time,add_days=k*2) if auto_schedule else None
+                                yt_upload(p,(safe["shorts_titles"][k] if k<len(safe["shorts_titles"]) else "Follow the money")+" #shorts","Full film on Shadow Ledger.",["shorts","finance"],when=sw)
+                                JOB["log"].append(f"☁️ Shorts #{k+1} uploaded{' '+sw if sw else ''}")
                             except Exception: pass
                         live("✅ Upload completed",1.0)
                 except Exception as e: JOB["log"].append(f"⚠️ Upload failed: {str(e)[:60]}")
@@ -767,11 +761,10 @@ def revenue_forecast():
     tot=mk+mc+my
     return {"subs":r*80,"hrs":r*40,"yt_ready":(r*80>=1000 and r*40>=4000),"usd":tot,"zar":tot*18.5,"target":tot*18.5>=100000}
 
-# ---------------- UI (FINAL — hardened) ----------------
+# ---------------- UI (v41 — glowing step guide + flexible schedule + clarified sidebar) ----------------
 st.set_page_config(page_title="Shadow Ledger Studio",page_icon="🎬",layout="wide")
 st.markdown("""<style>
  .stApp{background:radial-gradient(1200px 600px at 80% -10%,#14304f66,transparent),linear-gradient(180deg,#070d18,#0b1526 60%,#081020);}
- .stApp::after{content:"";position:fixed;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,transparent 0 3px,#0001 3px 4px);}
  h1,h2,h3{color:#ffd76a !important;font-family:Georgia,serif;text-shadow:0 0 18px rgba(245,197,66,.35);}
  p,span,div,label{color:#e8f0ff;}
  [data-testid="stCaptionContainer"],.stCaption{color:#9fb3d1 !important;}
@@ -787,20 +780,19 @@ st.markdown("""<style>
  .card{background:linear-gradient(180deg,#13223c,#0e1a30);border:1px solid #24406b;border-radius:14px;padding:.7rem 1rem;margin:.45rem 0;color:#e8f0ff;box-shadow:inset 0 1px 0 #ffffff10,0 4px 14px #0007;}
  .chip{display:inline-block;padding:.28rem .75rem;border-radius:999px;margin:0 .3rem .3rem 0;font-size:.78rem;border:1px solid #33507c;font-weight:700;}
  .chip.done{background:#0f3524;color:#7ee2a8;border-color:#1d5c3a}.chip.now{background:#3a2f14;color:#ffd76a;border-color:#8a6d2f;animation:pulse 1.8s infinite}.chip.todo{background:#141c2b;color:#7d8fa8}
+ .gchip{display:inline-block;padding:.3rem .7rem;border-radius:999px;margin:0 .25rem .3rem 0;font-size:.75rem;font-weight:800;border:1px solid #33507c;color:#7d8fa8;background:#141c2b;}
+ .gchip.done{background:#0f3524;color:#7ee2a8;border-color:#1d5c3a;}
+ .gchip.next{color:#ffd76a;border-color:#f5c542;background:#3a2f14;animation:glow 1.6s ease-in-out infinite;}
  .section{margin:1.2rem 0 .4rem;padding:.6rem 1rem;border-left:4px solid #f5c542;background:linear-gradient(90deg,#f5c54214,transparent);border-radius:0 12px 12px 0;color:#ffd76a;font-weight:800;letter-spacing:.06em;text-transform:uppercase;}
- .stTextInput input,.stTextArea textarea,.stNumberInput input{background:#0d1830 !important;border:1px solid #2a4a7a !important;color:#e8f0ff !important;border-radius:10px;}
  [data-testid="stSidebar"]{background:linear-gradient(180deg,#0c1626,#0a1220);border-right:1px solid #24406b}
  .stProgress > div > div{background:linear-gradient(90deg,#f5c542,#39d0ff) !important}
  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+ @keyframes glow{0%,100%{box-shadow:0 0 4px #f5c54233}50%{box-shadow:0 0 18px #f5c542aa}}
 </style>""",unsafe_allow_html=True)
 
 line=st.session_state.line
 jb=job_load()
-if not jb["history"] and not jb["running"]:
-    vj=vault_load_job()
-    if vj: jb=vj; job_save(jb)
-connected=bool(os.path.exists(YT_TOK_F) or YT_RT)
-st.markdown(f"<div class='console'><span><span class='led {'y' if jb['running'] else 'g'}'></span>RENDER {'ACTIVE' if jb['running'] else 'IDLE'}</span><span><span class='led {'g' if connected else 'r'}'></span>YOUTUBE</span><span><span class='led g'></span>VOICE</span><span><span class='led g'></span>PILOT</span><span><span class='led {'g' if connected else 'r'}'></span>VAULT</span><span class='clk'>🕒 {datetime.now().strftime('%H:%M:%S')}</span></div>",unsafe_allow_html=True)
+st.markdown(f"<div class='console'><span><span class='led {'y' if jb['running'] else 'g'}'></span>RENDER {'ACTIVE' if jb['running'] else 'IDLE'}</span><span><span class='led {'g' if (os.path.exists(YT_TOK_F) or YT_RT) else 'r'}'></span>YOUTUBE</span><span><span class='led g'></span>VOICE</span><span><span class='led g'></span>PILOT</span><span><span class='led g'></span>VAULT</span><span class='clk'>🕒 {datetime.now().strftime('%H:%M:%S')}</span></div>",unsafe_allow_html=True)
 flags={"scan":bool(st.session_state.get("scan")),"slate":bool(line),"series":bool(st.session_state.get("series_checked")),"script":any(i["status"] in ("scripted","approved","rendered") for i in line),"approve":any(i["status"] in ("approved","rendered") for i in line),"render":any(i["status"]=="rendered" for i in line),"pack":bool(st.session_state.get("packed"))}
 order=["scan","slate","series","script","approve","render","pack"]
 labels={"scan":"1 SCAN","slate":"2 SLATE","series":"3 SERIES","script":"4 SCRIPT+GATE","approve":"5 APPROVE","render":"6 RENDER","pack":"7 PACK"}
@@ -814,20 +806,27 @@ st.markdown("".join(f"<span class='chip {states[k]}'>{'✅ ' if states[k]=='done
 st.progress(pct,text=f"Pipeline {int(pct*100)}% complete")
 
 support=st.sidebar.text_input("☕ Support link (Ko-fi)","https://ko-fi.com/shadowledger")
-shop=st.sidebar.text_input("📄 Case File shop link","")
+shop=st.sidebar.text_input("📄 Case File shop link (Ko-fi shop URL — blank until you open one)","")
 ep_num=st.sidebar.text_input("Episode #","001")
-voice=st.sidebar.text_input("Narrator voice ID","longanyang")
-mood=st.sidebar.selectbox("Narration mood",list(MOODS))
-auto_mood=st.sidebar.checkbox("🎭 Auto-rotate mood",True)
+voice=st.sidebar.text_input("🎙️ Narrator voice ID (CosyVoice)","longanyang")
+st.sidebar.caption("Leave as-is; the studio auto-picks the best premium voice.")
+auto_mood=st.sidebar.checkbox("🎭 Auto-rotate mood per episode (recommended)",True)
+mood=st.sidebar.selectbox("🎭 Manual mood (only if auto-rotate OFF)",list(MOODS))
+st.sidebar.caption("Voices & drama auto-choose; mood only colors the tone. Auto = variety.")
 auto_upload=st.sidebar.checkbox("☁️ Auto-upload after render",True)
-auto_schedule=st.sidebar.checkbox("📅 Auto-schedule Fridays",True)
+auto_schedule=st.sidebar.checkbox("📅 Auto-schedule (your days/times)",True)
+ep_day=st.sidebar.selectbox("📅 Episode publish day",DAYS,index=4)
+ep_time=st.sidebar.text_input("🕘 Episode publish time (UTC)","21:00")
+sh_day=st.sidebar.selectbox("📅 Shorts publish day",DAYS,index=0)
+sh_time=st.sidebar.text_input("🕘 Shorts publish time (UTC)","17:00")
 auto_feed=st.sidebar.checkbox("🤖 Auto-feed ≥80 predictions",False)
-music=st.sidebar.file_uploader("House score (optional)",type=["mp3","wav"])
+music=st.sidebar.file_uploader("🎵 YOUR theme music (optional — else studio composes its own score)",type=["mp3","wav"])
 music_path=None
 if music: music_path=f"{TMP}/house_{music.name}"; open(music_path,"wb").write(music.getbuffer())
 series=st.sidebar.text_input("Series brand","The Monopoly Files")
 with st.sidebar.expander("💳 CREDIT & RAMP CONSOLE",expanded=True):
-    cr=cred_load(); loaded=st.number_input("Loaded credits (ZAR)",0,100000,int(cr.get("loaded_zar",0)),100)
+    cr=cred_load(); loaded=st.number_input("💰 Credits YOU loaded on Alibaba (ZAR) — type your top-up, e.g. 1000",0,100000,int(cr.get("loaded_zar",0)),100)
+    st.sidebar.caption("Studio subtracts its tracked spend → live remaining + episodes left.")
     if int(loaded)!=int(cr.get("loaded_zar",0)): cr["loaded_zar"]=int(loaded); cred_save(cr)
     costs=jload(COST_F,[]); spent=sum(c.get("est",0) for c in costs)*18.5; rem=loaded-spent
     burn=spent/len(costs) if costs else 0
@@ -841,15 +840,13 @@ with st.sidebar.expander("🧑✈️ CEO's Pilot"):
     pmsg=st.text_input("Your order, CEO")
     if st.button("📨 Send to Pilot"):
         if pmsg.strip():
-            try:
-                reply,outs=ceo_pilot(pmsg); st.success(reply)
-                for o in outs: st.caption(o)
-            except Exception as e: st.error(f"Pilot hiccup: {str(e)[:100]}")
+            reply,outs=ceo_pilot(pmsg); st.success(reply)
+            for o in outs: st.caption(o)
 with st.sidebar.expander("🔑 Connect YouTube + Vault"):
     if YTC_ID and YTC_SEC: st.success("Secrets detected ✅")
-    else: st.warning("Secrets must be exactly YOUTUBE_CLIENT_ID + YOUTUBE_CLIENT_SECRET (all caps).")
-    if st.button("1️⃣ Get connect link (YouTube + Vault)"): st.code(yt_auth_url(FULL))
-    if st.button("1️⃣ Get connect link (YouTube only)"): st.code(yt_auth_url(YT_ONLY))
+    else: st.warning("Secrets must be YOUTUBE_CLIENT_ID + YOUTUBE_CLIENT_SECRET (all caps).")
+    if st.button("1️⃣ Connect link (YouTube + Vault)"): st.code(yt_auth_url(FULL))
+    if st.button("1️⃣ Connect link (YouTube only)"): st.code(yt_auth_url(YT_ONLY))
     code=st.text_input("2️⃣ Paste the code")
     if code and st.button("🔗 Connect"):
         try:
@@ -867,11 +864,23 @@ adv=balance_advice(line)
 angle_list=list(ANGLES)
 angle=st.sidebar.selectbox("Story angle",angle_list,index=angle_list.index(adv) if adv in angle_list else 0)
 pilot=st.sidebar.checkbox("PILOT MODE (60-90s)",True)
-jsave(SET_F,{"series":series,"pilot":pilot,"auto_mood":auto_mood,"mood":mood,"angle":angle,"voice":voice,"music":music_path,"support":support})
+jsave(SET_F,{"series":series,"pilot":pilot,"auto_mood":auto_mood,"mood":mood,"angle":angle,"voice":voice,"music":music_path,"support":support,"ep_day":ep_day,"ep_time":ep_time,"sh_day":sh_day,"sh_time":sh_time})
 tab1,tab2,tabS,tab3,tab4=st.tabs(["🥚 1·SCAN","🏭 2·PRODUCE","💼 SPONSOR","📦 3·PUBLISH","📈 STRATEGY"])
 
+def guide(steps):
+    html=""
+    nxt=False
+    for name,done in steps:
+        if done: cls="done"; lab="✅"
+        elif not nxt: cls="next"; lab="👉"; nxt=True
+        else: cls=""; lab="•"
+        html+=f"<span class='gchip {cls}'>{lab} {name}</span>"
+    st.markdown(html,unsafe_allow_html=True)
+
 with tab1:
-    st.markdown("<div class='section'>🗺️ START HERE — press in numbered order</div>",unsafe_allow_html=True)
+    bull_items=jload(BULL_F,{}).get("items",[])
+    guide([("1 BULLETIN",bool(bull_items)),("2 SEND",bool(st.session_state.get("scan")) or bool(st.session_state.get("seed_add_multi"))),("3 SCAN",bool(st.session_state.get("scan"))),("4+ PRODUCE ➔",bool(st.session_state.get("scan")))])
+    st.markdown("<div class='section'>🗺️ START HERE — follow the glowing step</div>",unsafe_allow_html=True)
     if "seeds_str" not in st.session_state: st.session_state.seeds_str=load_seeds()
     pa=st.session_state.pop("seed_add",None)
     if pa and pa not in st.session_state.seeds_str: st.session_state.seeds_str+="\n"+pa
@@ -889,7 +898,7 @@ with tab1:
                 with st.spinner("📡 Listening…"): st.session_state["bull"]=refresh_bulletin(st.session_state.seeds_str)
             except Exception as e:
                 st.error(f"📡 Bulletin hit a wall: {str(e)[:120]} — try again in a minute.")
-        for i in (st.session_state.get("bull") or jload(BULL_F,{}).get("items",[]))[:10]:
+        for i in (st.session_state.get("bull") or bull_items)[:10]:
             tag="🔥" if i["sc"]>=80 else "⭐" if i["sc"]>=60 else "•"
             score_txt=f" — 🥚 {i['sc']}/100" if i["sc"] else ""
             c1,c2,c3=st.columns([4,1,1])
@@ -899,56 +908,44 @@ with tab1:
         ca,cb=st.columns(2)
         if ca.button("2️⃣ SEND ALL ≥70 TO SCAN SEEDS"):
             cur=[x for x in st.session_state.seeds_str.splitlines() if x.strip()]
-            st.session_state["seed_add_multi"]=[i["t"] for i in (st.session_state.get("bull") or []) if i["sc"]>=70 and i["t"] not in cur]
+            st.session_state["seed_add_multi"]=[i["t"] for i in (st.session_state.get("bull") or bull_items) if i["sc"]>=70 and i["t"] not in cur]
             st.success("✅ Sent to Scan box.")
         if cb.button("➕ QUEUE ALL ≥80 TO LINE"):
-            st.success(f"✅ Queued {sum(1 for i in (st.session_state.get('bull') or []) if i['sc']>=80 and queue_topic(i['t'],i['sc'],'BULLETIN'))}")
+            st.success(f"✅ Queued {sum(1 for i in (st.session_state.get('bull') or bull_items) if i['sc']>=80 and queue_topic(i['t'],i['sc'],'BULLETIN'))}")
     seeds=st.text_area("Seed topics (your ideas + hot topics)",st.session_state.seeds_str)
     st.session_state.seeds_str=seeds
     if st.button("3️⃣ STEP 1 · GOLDEN EGG SCAN"):
         save_seeds(seeds)
         with st.spinner(" Scanning…"):
-            res=[]
-            for s in [x for x in seeds.splitlines() if x.strip()]:
-                try:
-                    sc,why=golden_egg(s); res.append((s,sc,why))
-                except Exception: pass
-            st.session_state.scan=sorted(res,key=lambda r:-r[1])
+            st.session_state.scan=sorted([(s,golden_egg(s)[0],golden_egg(s)[1]) for s in [x for x in seeds.splitlines() if x.strip()]],key=lambda r:-r[1])
     if st.session_state.get("scan"):
         for j,(t,sc,w) in enumerate(st.session_state.scan):
             st.markdown(f"<div class='card'>{'🏆 ' if j==0 else ''}<b>{t}</b> — 🥚 {sc}/100 · {w}</div>",unsafe_allow_html=True)
-    st.markdown("<div class='section'>🧠 INTELLIGENCE SECTION — use these to boost your scores</div>",unsafe_allow_html=True)
+    st.markdown("<div class='section'>🧠 INTELLIGENCE SECTION — boost your scores here</div>",unsafe_allow_html=True)
     with st.expander("🎯 Hunt 80+ engine"):
         ht=st.text_input("Theme to hunt","global financial scandals, monopolies, comebacks")
         hm=st.number_input("Min score",50,100,80,5)
-        if st.button("🎯 HUNT HIGH SCORERS"):
-            try: st.session_state["hunt_res"]=hunt(ht,int(hm))
-            except Exception as e: st.error(f"Hunt hiccup: {str(e)[:100]}")
+        if st.button("🎯 HUNT HIGH SCORERS"): st.session_state["hunt_res"]=hunt(ht,int(hm))
         for t,sc,why in st.session_state.get("hunt_res",[]):
             st.markdown(f"**🔥 {t}** — 🥚 {sc}/100")
             if st.button(f"➕ Queue {t[:40]}",key=f"hq_{t}"): queue_topic(t,sc,"HUNTED")
     with st.expander("🔮 Trend Anticipation"):
         stt=st.text_input("Seed to predict","BlackRock")
-        if st.button("🔮 PREDICT SPIKES"):
-            try: st.session_state["spikes"]=predict_spikes(stt)
-            except Exception as e: st.error(f"Predict hiccup: {str(e)[:100]}")
+        if st.button("🔮 PREDICT SPIKES"): st.session_state["spikes"]=predict_spikes(stt)
         for t,sc,why in st.session_state.get("spikes",[])[:6]:
             st.markdown(f"**{'🔥' if sc>70 else '⭐'} {t}** — 🥚 {sc}/100")
             if st.button("➕",key=f"aq_{t}"): queue_topic(t,sc,"ANTICIPATED")
     with st.expander("📊 Analytics loop (studio learns)"):
-        if connected:
+        if os.path.exists(YT_TOK_F) or YT_RT:
             vids=[(i.get("yt_id"),i.get("angle"),i["topic"]) for i in line if i.get("yt_id")]
             if vids and st.button("FETCH 48H METRICS"):
                 for vid,a,t in vids:
-                    try:
-                        m=yt_metrics(vid)
-                        if m:
-                            met=jload(MET_F,{}); met[vid]={**m,"angle":a,"topic":t}; jsave(MET_F,met)
-                            st.caption(f"• {t[:25]}: CTR {m['ctr']}%")
-                            hof_update(vid,(m.get("views",0)/1000)+(float(m.get("ctr") or 0)*5))
-                    except Exception: pass
+                    m=yt_metrics(vid)
+                    if m:
+                        met=jload(MET_F,{}); met[vid]={**m,"angle":a,"topic":t}; jsave(MET_F,met)
+                        st.caption(f"• {t[:25]}: CTR {m['ctr']}%")
+                        hof_update(vid,(m.get("views",0)/1000)+(float(m.get("ctr") or 0)*5))
                 st.success("✅ Learned.")
-        else: st.caption("Connect YouTube to enable learning.")
     with st.expander("🏆 Hall of Fame + auto-sequel"):
         h=jload(HOF_F,[])
         if h:
@@ -972,13 +969,11 @@ with tab2:
             for i,it in enumerate(line):
                 st.markdown(f"<div class='card'>EP {i+1} · <b>{it['topic']}</b> — <code>{it['status']}</code></div>",unsafe_allow_html=True)
             st.markdown("## 5️⃣ STEP 3 · Series potential")
-            if st.button("5️⃣ CHECK SERIES"):
-                try: st.session_state.splan=series_plan(line[0]["topic"])
-                except Exception as e: st.error(str(e)[:100])
+            if st.button("5️⃣ CHECK SERIES"): st.session_state.splan=series_plan(line[0]["topic"])
             if st.session_state.get("splan"):
                 spn=st.session_state.splan
-                st.markdown(f"**Verdict:** {'✅ series' if spn.get('series') else '❌ standalone'} — {spn.get('why','')}")
-                if spn.get("series") and st.button("➕ ADD SERIES"):
+                st.markdown(f"**Verdict:** {'✅ series' if spn['series'] else '❌ standalone'} — {spn['why']}")
+                if spn["series"] and st.button("➕ ADD SERIES"):
                     for e in spn.get("episodes",[]): queue_topic(e,line[0]["score"],"SERIES")
                     st.session_state.series_checked=True
         if flags["series"]:
@@ -987,18 +982,15 @@ with tab2:
                 if st.button("6️⃣ WRITE SCRIPT + GATE"):
                     it=next(x for x in line if x["status"]=="queued")
                     it["angle"]=it.get("angle") or angle
-                    try:
-                        it["script"],g=script_with_floor(it["topic"],series,it["angle"]); it["gate"]=g
-                        it["status"]="scripted"; save_line(line)
-                        st.session_state.edits={i2:(s["narration"],s["visual"]) for i2,s in enumerate(it["script"]["scenes"])}
-                        st.success("✅ Scripted + gated.")
-                    except Exception as e: st.error(f"Script hiccup: {str(e)[:100]}")
+                    it["script"],g=script_with_floor(it["topic"],series,it["angle"]); it["gate"]=g
+                    it["status"]="scripted"; save_line(line)
+                    st.session_state.edits={i2:(s["narration"],s["visual"]) for i2,s in enumerate(it["script"]["scenes"])}
+                    st.success("✅ Scripted + gated.")
         cur=next((x for x in line if x["status"]=="scripted"),None)
         if cur:
             st.markdown("## 7️⃣ STEP 5 · Approve")
             if st.button("🎬 COLD-OPEN A/B PREVIEWS"):
-                try: st.session_state[f"cp_{line.index(cur)}"]=render_cold_open_preview(cur["script"],voice,mood,line.index(cur))
-                except Exception as e: st.error(f"Preview hiccup: {str(e)[:100]}")
+                st.session_state[f"cp_{line.index(cur)}"]=render_cold_open_preview(cur["script"],voice,mood,line.index(cur))
             for tag,p,txt in st.session_state.get(f"cp_{line.index(cur)}",[]):
                 st.video(p); st.caption(f"**{tag}:** {txt}")
             if st.button("7️⃣ APPROVE → UNLOCK RENDER"):
@@ -1011,16 +1003,13 @@ with tab2:
             st.progress(lv["pct"])
         for ln in jb["log"][-6:]: st.caption(ln)
         st.button("🔄 REFRESH STATUS")
-        nx=next((x for x in line if x["status"]=="approved"),None)
         cA,cB=st.columns(2)
         if cA.button("8️⃣ RENDER NEXT (background)"):
-            if job_load()["running"]: st.warning("Already running.")
-            elif nx:
-                threading.Thread(target=batch_worker,args=([nx["topic"]],auto_upload,auto_schedule,auto_feed),daemon=True).start(); st.success("☁️ Started.")
-            else: st.warning("Approve a script first (STEP 5).")
+            if not job_load()["running"]:
+                nx=next((x for x in line if x["status"]=="approved"),None)
+                if nx: threading.Thread(target=batch_worker,args=([nx["topic"]],auto_upload,auto_schedule,auto_feed),daemon=True).start(); st.success("☁️ Started.")
         if cB.button("8️⃣ RENDER ENTIRE LINE"):
-            if job_load()["running"]: st.warning("Already running.")
-            else:
+            if not job_load()["running"]:
                 threading.Thread(target=batch_worker,args=(None,auto_upload,auto_schedule,auto_feed),daemon=True).start(); st.success("☁️ Batch started.")
         st.markdown("<div class='section'>📺 LIVE OPS + 🗂 HISTORY (survives reboot)</div>",unsafe_allow_html=True)
         jl=job_load()
@@ -1038,15 +1027,13 @@ with tab2:
                 c1,c2,c3=st.columns(3)
                 c1.download_button("⬇️ MP4",open(it["out"],"rb").read(),f"EPISODE_{ep}_{sl}.mp4",key=f"dl_{ep}")
                 if c2.button(f"📦 PACK {ep}",key=f"pk_{ep}"):
-                    try:
-                        entries,safe,extra=pack_entries(it,ep,support,shop,series)
-                        z=io.BytesIO()
-                        with zipfile.ZipFile(z,"w") as zf:
-                            for n,d,ip in entries:
-                                if ip: zf.write(d,n)
-                                else: zf.writestr(n,d)
-                        st.session_state[f"pz_{ep}"]=z.getvalue()
-                    except Exception as e: st.error(f"Pack hiccup: {str(e)[:100]}")
+                    entries,safe,extra=pack_entries(it,ep,support,shop,series)
+                    z=io.BytesIO()
+                    with zipfile.ZipFile(z,"w") as zf:
+                        for n,d,ip in entries:
+                            if ip: zf.write(d,n)
+                            else: zf.writestr(n,d)
+                    st.session_state[f"pz_{ep}"]=z.getvalue()
                 if st.session_state.get(f"pz_{ep}"): c3.download_button("⬇️ ZIP",st.session_state[f"pz_{ep}"],f"PACK_{ep}.zip",key=f"dz_{ep}")
 
 with tabS:
@@ -1064,22 +1051,23 @@ with tab3:
         ch=st.selectbox("Episode to pack",[i["topic"] for i in rendered])
         it=rendered[[i["topic"] for i in rendered].index(ch)]
         if st.button("📦 BUILD PUBLISH PACK"):
-            try:
-                entries,safe,extra=pack_entries(it,ep_num,support,shop,series)
-                z=io.BytesIO()
-                with zipfile.ZipFile(z,"w") as zf:
-                    for n,d,ip in entries:
-                        if ip: zf.write(d,n)
-                        else: zf.writestr(n,d)
-                st.session_state.packed=True
-                st.download_button("📦 DOWNLOAD PACK",z.getvalue(),f"SHADOW_LEDGER_PACK_{ep_num}.zip")
-                st.success("✅ Pack ready.")
-            except Exception as e: st.error(f"Pack hiccup: {str(e)[:100]}")
+            entries,safe,extra=pack_entries(it,ep_num,support,shop,series)
+            z=io.BytesIO()
+            with zipfile.ZipFile(z,"w") as zf:
+                for n,d,ip in entries:
+                    if ip: zf.write(d,n)
+                    else: zf.writestr(n,d)
+            st.session_state.packed=True
+            st.download_button("📦 DOWNLOAD PACK",z.getvalue(),f"SHADOW_LEDGER_PACK_{ep_num}.zip")
+            st.success("✅ Pack ready.")
 
 with tab4:
     rf=revenue_forecast()
     st.markdown(f"**Projected:** ${rf['usd']:.0f}/mo ≈ R{rf['zar']:.0f} · Subs ~{rf['subs']} · {'✅ YPP-ready' if rf['yt_ready'] else '⏳ building'}")
     if rf["target"]: st.success("🏆 R100k/month TARGET REACHED")
-    st.markdown("""**FINAL — FULLY HARDENED.** All previous fixes + syntax fix + hang-guard + token fail-safe + bulletin safety +
-    quota-halved scan + reboot-surviving history + graceful degradation everywhere. The studio cannot hang, crash on a
-    Google wobble, or lose your pipeline again. **Press the numbered flow and let it cook, CEO.** 🎬""")
+    st.markdown("""**v41 — GLOWING STEP GUIDE + FLEXIBLE SCHEDULE + CLARIFIED SIDEBAR + ALL FIXES.** The numbered steps now glow
+    on/off as you complete them; you choose ANY publish day/time for episodes AND Shorts; sidebar controls are labelled &
+    explained; socket time-limit + fail-safe token refresh + friendly bulletin (no more hangs/crashes); dark config.toml
+    kills white boxes; live render timeline + reboot-proof history; Vault + YouTube re-link + refresh-token immunity;
+    PRESTIGE models; CEO's Pilot; Hunt 80+; Anticipation; analytics learning; Hall of Fame; dubs; sponsor suite;
+    revenue forecast. **The complete, perfect, un-killable studio.** 🎬""")
