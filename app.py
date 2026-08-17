@@ -7,7 +7,13 @@ from moviepy.audio.io.AudioFileClip import AudioFileClip
 from moviepy.video.VideoClip import ImageClip
 from moviepy.audio.AudioClip import AudioClip, CompositeAudioClip, AudioArrayClip
 from moviepy.video.compositing.CompositeVideoClip import CompositeVideoClip
-from moviepy.video.compositing.concatenate import concatenate_videoclips
+try:
+    from moviepy.video.compositing.concatenate import concatenate_videoclips
+except Exception:
+    try:
+        from moviepy.video.compositing import concatenate_videoclips
+    except Exception:
+        from moviepy import concatenate_videoclips
 import moviepy.video.fx as vfx
 
 # ---------------- CONFIG (pure requests — no SDK, no Pillow dependency) ----------------
@@ -25,12 +31,6 @@ MOODS = {
  "Cold expose": "clinical, sharp, controlled anger, precise diction, ice-cold delivery",
  "Hushed suspense": "near-whisper, tense, every word a secret, long silences",
  "Hopeful storyteller": "warm, admiring, quietly triumphant, a smile in the voice, still slow and cinematic",
-}
-ANGLES = {
- "Dark expose (default)": "Tone: dark investigative expose. Dopamine via outrage, justice, revelation.",
- "Mystery / curiosity": "Tone: puzzle-box mystery. Dopamine via curiosity loops and the final click of understanding.",
- "David vs Goliath": "Tone: underdog versus a financial giant. Dopamine via fairness and clever resistance.",
- "Comeback / positive)": "Tone: triumphant human comeback inside finance. NOT a forced happy ending — earned, bittersweet, still leaves an open question.",
 }
 ANGLES = {
  "Dark expose (default)": "Tone: dark investigative expose. Dopamine via outrage, justice, revelation.",
@@ -465,7 +465,7 @@ def pack_entries(it, ep, support, shop, series):
     entries.append(("rights_record.txt", RIGHTS.encode(), False))
     return entries, safe
 
-# ---------------- UI (MISSION CONTROL v22) ----------------
+# ---------------- UI (MISSION CONTROL v23) ----------------
 st.set_page_config(page_title="Shadow Ledger Studio", page_icon="🎬", layout="wide")
 st.markdown("""<style>
  .stApp{background:#0b0e13}
@@ -797,10 +797,10 @@ with tab3:
             st.json(safe)
 
 with tab4:
-    st.markdown("""**v22 MISSION CONTROL — dependency-free engine.** The dashscope SDK (which dragged Pillow into the
-    build) is GONE; video/images now use plain REST calls, voice uses pure-Python gTTS. Nothing left to compile.
-    SERIES MODE talks to you (✅ EP 1 done → starting EP 2…), resumes after crashes, downloads in SMALL PARTS with
-    SCHEDULE.txt (Fridays 16:00 EST). Plus: 🙏 supporter credits, 💼 Sponsor Suite, ✅/⭐/🔒 chips, READY captions,
-    retry-only-failed, auto-numbered shop-ready packs, Gate + YouTube Guard, rights record + checklist.
-    **PHASED REVENUE:** ☕ tips now · 📄 Case Files $5 next · 📚 affiliates later · 💼 sponsors + memberships + merch.
-    **Roadmap:** PWA → native app → OAuth upload → dubs → analytics loop.""")
+    st.markdown("""**v23 MISSION CONTROL — dependency-free engine + bulletproof moviepy import.** Video/images via plain
+    REST, voice via pure-Python gTTS, concatenate imported through a 3-way safety chain. SERIES MODE talks to you
+    (✅ EP 1 done → starting EP 2…), resumes after crashes, downloads in SMALL PARTS with SCHEDULE.txt
+    (Fridays 16:00 EST). Plus: 🙏 supporter credits, 💼 Sponsor Suite, ✅/⭐/🔒 chips, READY captions, retry-only-failed,
+    auto-numbered shop-ready packs, Gate + YouTube Guard, rights record + checklist. **PHASED REVENUE:** ☕ tips now ·
+    📄 Case Files $5 next · 📚 affiliates later · 💼 sponsors + memberships + merch. **Roadmap:** PWA → native app →
+    OAuth upload → dubs → analytics loop.""")
