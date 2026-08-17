@@ -870,7 +870,8 @@ with tab1:
         for i in (st.session_state.get("bull") or jload(BULL_F,{}).get("items",[]))[:10]:
             tag="🔥" if i["sc"]>=80 else "⭐" if i["sc"]>=60 else "•"
             c1,c2,c3=st.columns([4,1,1])
-            c1.markdown(f"{tag} **{i['t']}**{f' — 🥚 {i[\"sc\"]}/100' if i['sc'] else ''} · `{i['src']}`")
+            score_txt = f" — 🥚 {i['sc']}/100" if i["sc"] else ""
+            c1.markdown(f"{tag} **{i['t']}**{score_txt} · `{i['src']}`")
             if c2.button("➕",key=f"bq_{i['t']}"): queue_topic(i["t"],i["sc"],i["src"])
             if c3.button("📋",key=f"bs_{i['t']}"): st.session_state["seed_add"]=i["t"]
         ca,cb=st.columns(2)
