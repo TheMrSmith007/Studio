@@ -634,7 +634,7 @@ def render(sc, topic, series, pilot, music, voice, mood, sp=None, angle="Dark ex
         layers.append(ImageClip(f"{TMP}/bug.png").resized(height=64).with_position((28,28)).with_duration(final.duration))
     # pattern interrupt visual overlay every 45s
     for drop_t in np.arange(45.0, final.duration-1, 45.0):
-        layers.append(pattern_interrupt(0.8).with_start(drop_t).with_position(("center","center"))
+        layers.append(pattern_interrupt(0.8).with_start(drop_t).with_position(("center","center")))
     layers.append(ImageClip(card_img("IF YOU FOLLOW THE MONEY,","subscribe - new investigations weekly",transparent=True))
                   .with_duration(5).with_start(final.duration*0.68).with_position((76,540))
                   .with_effects([vfx.FadeIn(0.6), vfx.FadeOut(0.8)]))
