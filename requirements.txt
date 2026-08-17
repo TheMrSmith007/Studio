@@ -6,3 +6,6 @@ gTTS
 moviepy==2.1.2
 imageio-ffmpeg
 pillow==10.4.0
+google-api-python-client
+google-auth
+google-auth-httplib2
