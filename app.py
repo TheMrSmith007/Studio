@@ -1,5 +1,7 @@
 import warnings
 warnings.filterwarnings("ignore")
+import socket
+socket.setdefaulttimeout(20)
 import streamlit as st, requests, json, os, io, re, zipfile, hashlib, textwrap, time, base64, threading
 from datetime import datetime, timedelta, date
 import numpy as np
