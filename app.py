@@ -125,7 +125,7 @@ MOOD_ROT=list(MOODS.keys())
 ANGLES={"Dark expose (default)":"Tone: dark investigative expose.","Mystery / curiosity":"Tone: puzzle-box mystery.","David vs Goliath":"Tone: underdog versus a financial giant.","Comeback / positive":"Tone: triumphant human comeback."}
 TONE_LABEL={"Dark expose (default)":"A DARK EXPOSE","Mystery / curiosity":"A MYSTERY","David vs Goliath":"AN UNDERDOG STORY","Comeback / positive":"A COMEBACK"}
 
-# ---------------- TTS TEXT NORMALIZER (broadcast-grade speech) ----------------
+# ---------------- TTS NORMALIZER ----------------
 _ONES=["","one","two","three","four","five","six","seven","eight","nine","ten","eleven","twelve","thirteen","fourteen","fifteen","sixteen","seventeen","eighteen","nineteen"]
 _TENS=["","","twenty","thirty","forty","fifty","sixty","seventy","eighty","ninety"]
 def _w3(n):
@@ -158,7 +158,7 @@ def normalize_tts(t):
     return t
 def mood_for(i): return MOOD_ROT[i%len(MOOD_ROT)]
 
-# ---------------- OAUTH + YOUTUBE + DRIVE ----------------
+# ---------------- OAUTH + YOUTUBE + DRIVE (all ON-DEMAND, never at boot) ----------------
 YT_ONLY="https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube https://www.googleapis.com/auth/yt-analytics.readonly"
 FULL=YT_ONLY+" https://www.googleapis.com/auth/drive.file"
 def yt_auth_url(scopes=FULL):
@@ -245,20 +245,17 @@ def yt_channel_uploads():
         return vids
     except Exception: return []
 
+# ---------------- LINE (local-only at boot) ----------------
 def load_line(): return jload(LINE_F,[])
 def save_line(l):
-    jsave(LINE_F,l); vault_save(l)
+    jsave(LINE_F,l)
 if "line" not in st.session_state:
-    _l=load_line()
-    if not _l:
-        _l=vault_load() or []
-        if _l: jsave(LINE_F,_l)
-    st.session_state.line=_l
+    st.session_state.line=load_line()
 if "edits" not in st.session_state: st.session_state.edits={}
 for _it in st.session_state.line:
     if _it["status"]=="rendered" and not os.path.exists(_it.get("out") or ""):
         _it["status"]="approved"; _it["err"]="media cache cleared — script kept, press render to redo"
-save_line(st.session_state.line)
+jsave(LINE_F, st.session_state.line)
 def queue_topic(t,sc,tag):
     line=load_line()
     if t and not any(i["topic"]==t for i in line):
@@ -301,7 +298,7 @@ def qwen(prompt,sys=None):
     raise RuntimeError(f"chat failed: {last}")
 def wan_video_prompt(v): return f"{v}. cinematic documentary film still, anamorphic 2.39:1, 35mm grain, low-key chiaroscuro, crushed blacks, gold practicals, teal shadows, slow dolly, no text, no watermark"
 
-# ---------------- VOICE CHAIN (normalized + best-model-first) ----------------
+# ---------------- VOICE CHAIN ----------------
 def speak(text,voice,mood):
     text=normalize_tts(text)
     try:
@@ -548,7 +545,7 @@ def case_file_pdf(topic,series,dos,support,path,ep="001"):
                 d.text((90,y),("• " if k==0 else "   ")+ln,font=F(30),fill=(220,220,220)); y+=46
                 if y>H-160: pages.append(img); img,d=blank(); y=310
         pages.append(img)
-    section("TIMELINE",dos.get("timeline",[])); section("KEY PLAYERS",dos.get("key_players",[])); section("FOLLOW THE MONEY",dos.get("follow_the_money",[]))
+    section("TIMELINE",dos.get("timeline",[])); section("KEY_PLAYERS",dos.get("key_players",[])); section("FOLLOW THE MONEY",dos.get("follow_the_money",[]))
     section("GLOSSARY",dos.get("glossary",[])); section("DISCUSSION",dos.get("discussion",[]))
     img,d=blank(); d.text((W//2,800),"STAND WITH THE LEDGER",font=F(60),fill=GOLD,anchor="mm"); d.text((W//2,900),f"Tips & Case Files: {support}",font=F(30),fill=GOLD,anchor="mm")
     pages.append(img)
@@ -797,13 +794,14 @@ def batch_worker(topics=None,auto_upload=False,auto_schedule=True,auto_feed=Fals
             it["status"],it["err"]="failed",str(e)[:120]
             JOB["log"].append(f"⚠️ EP {idx+1} failed: {str(e)[:60]}")
             JOB["history"].insert(0,{"ep":idx+1,"topic":it["topic"][:34],"status":"failed","took":str(e)[:40],"ts":datetime.now().isoformat()})
-        save_line(line); JOB["live"]=None; job_save(JOB); vault_save_job(JOB)
+        save_line(line); JOB["live"]=None; job_save(JOB)
+    vault_save(line); vault_save_job(JOB)
     if auto_feed:
         try:
             n=sum(1 for t,s,w in predict_spikes(S.get("series","finance"))[:6] if s>=80 and queue_topic(t,s,"AUTO"))
             JOB["log"].append(f"🤖 Auto-feed queued {n}")
         except Exception: pass
-    JOB["running"]=False; JOB["current"]=""; job_save(JOB); vault_save_job(JOB)
+    JOB["running"]=False; JOB["current"]=""; job_save(JOB)
 
 def revenue_forecast():
     rev=jload(REV_F,{"kofi_tips":[],"case_files":[]}); line=load_line()
@@ -813,7 +811,7 @@ def revenue_forecast():
     tot=mk+mc+my
     return {"subs":r*80,"hrs":r*40,"yt_ready":(r*80>=1000 and r*40>=4000),"usd":tot,"zar":tot*18.5,"target":tot*18.5>=100000}
 
-# ---------------- UI (v43) ----------------
+# ---------------- UI (v44 — zero network at boot) ----------------
 st.set_page_config(page_title="Shadow Ledger Studio",page_icon="🎬",layout="wide")
 st.markdown("""<style>
  .stApp{background:radial-gradient(1200px 600px at 80% -10%,#14304f66,transparent),linear-gradient(180deg,#070d18,#0b1526 60%,#081020);}
@@ -898,7 +896,7 @@ with st.sidebar.expander("🧑✈️ CEO's Pilot"):
         if pmsg.strip():
             reply,outs=ceo_pilot(pmsg); st.success(reply)
             for o in outs: st.caption(o)
-with st.sidebar.expander("🔑 Connect YouTube + Vault"):
+with st.sidebar.expander("🔑 Connect + Vault (on-demand)"):
     if YTC_ID and YTC_SEC: st.success("Secrets detected ✅")
     else: st.warning("Secrets must be YOUTUBE_CLIENT_ID + YOUTUBE_CLIENT_SECRET (all caps).")
     if st.button("1️⃣ Connect (YouTube + Vault)"): st.code(yt_auth_url(FULL))
@@ -910,12 +908,21 @@ with st.sidebar.expander("🔑 Connect YouTube + Vault"):
             if rt: st.code(f'YT_REFRESH_TOKEN = "{rt}"')
         except Exception as e: st.error(str(e)[:120])
     if st.button("🔄 Recover rendered videos from YouTube"):
-        ups=yt_channel_uploads(); line=load_line(); hits=0
-        for vid,title in ups:
-            for it in line:
-                if it["topic"] and it["topic"][:25].lower() in title.lower() and it["status"]!="rendered":
-                    it["yt_id"]=vid; it["status"]="rendered"; hits+=1
-        save_line(line); st.success(f"✅ Re-linked {hits} episode(s).")
+        with st.spinner("🔄 Scanning your channel…"):
+            ups=yt_channel_uploads(); line=load_line(); hits=0
+            for vid,title in ups:
+                for it in line:
+                    if it["topic"] and it["topic"][:25].lower() in title.lower() and it["status"]!="rendered":
+                        it["yt_id"]=vid; it["status"]="rendered"; hits+=1
+            save_line(line); st.session_state.line=load_line()
+        st.success(f"✅ Re-linked {hits} episode(s).")
+    if st.button("☁️ Backup line to Vault"):
+        with st.spinner("☁️ Backing up…"): vault_save(load_line()); st.success("✅ Backed up.")
+    if st.button("⬇️ Restore line from Vault"):
+        with st.spinner("⬇️ Restoring…"):
+            r=vault_load()
+            if r: jsave(LINE_F,r); st.session_state.line=r; st.success(f"✅ Restored {len(r)} episode(s).")
+            else: st.warning("No Vault backup found.")
 adv=balance_advice(line)
 angle_list=list(ANGLES)
 angle=st.sidebar.selectbox("Story angle",angle_list,index=angle_list.index(adv) if adv in angle_list else 0)
@@ -1122,8 +1129,8 @@ with tab4:
     rf=revenue_forecast()
     st.markdown(f"**Projected:** ${rf['usd']:.0f}/mo ≈ R{rf['zar']:.0f} · Subs ~{rf['subs']} · {'✅ YPP-ready' if rf['yt_ready'] else '⏳ building'}")
     if rf["target"]: st.success("🏆 R100k/month TARGET REACHED")
-    st.markdown("""**v43 — BROADCAST-GRADE VOICE + FULL STABILITY.** NEW: TTS text-normalizer ("$112 billion" → "one hundred
-    twelve billion dollars"), best-model-first voice selection (prefers plus/instruct CosyVoice & Qwen TTS), normalized
-    dubs, plus all stability guards (fresh line reload, guarded Series/Winner, bulletproof bulletin). Everything else
-    intact: Vault, immunity, live ops, history, smart schedule, PRESTIGE, Pilot, Hunt, Anticipation, analytics, Hall of
-    Fame, dubs, sponsor, forecast. **No AI tell. No crashes. Just television.** 🎬""")
+    st.markdown("""**v44 — ZERO NETWORK AT BOOT (no more endless loading).** Startup now reads only local files (instant).
+    Google/Drive calls happen ONLY when you press Connect / Recover / Backup / Restore, or during background render+upload.
+    Keeps: broadcast-grade normalized voice, best-model-first TTS, all stability guards, Vault (on-demand), immunity,
+    live ops, history, smart schedule, PRESTIGE, Pilot, Hunt, Anticipation, analytics, Hall of Fame, dubs, sponsor,
+    forecast. **It loads fast, speaks human, and publishes itself.** 🎬""")
