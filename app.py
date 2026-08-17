@@ -14,9 +14,16 @@ except Exception:
         from moviepy.video.compositing import concatenate_videoclips
     except Exception:
         from moviepy import concatenate_videoclips
+try:
+    from moviepy.audio.compositing.concatenate import concatenate_audioclips
+except Exception:
+    try:
+        from moviepy.audio.compositing.CompositeAudioClip import concatenate_audioclips
+    except Exception:
+        from moviepy import concatenate_audioclips
 import moviepy.video.fx as vfx
 
-# ---------------- CONFIG (pure requests — no SDK, no Pillow dependency) ----------------
+# ---------------- CONFIG ----------------
 DASH, YT, PEX = st.secrets["DASHSCOPE_API_KEY"], st.secrets["YOUTUBE_API_KEY"], st.secrets["PEXELS_API_KEY"]
 BASE = "https://dashscope-intl.aliyuncs.com/api/v1"
 GOLD, BLACK = (212,175,55), (5,6,8)
@@ -32,6 +39,15 @@ MOODS = {
  "Hushed suspense": "near-whisper, tense, every word a secret, long silences",
  "Hopeful storyteller": "warm, admiring, quietly triumphant, a smile in the voice, still slow and cinematic",
 }
+EDGE_VOICES = {
+ "Calm investigator (default)": ("en-US-GuyNeural", "-10%"),
+ "Concerned witness": ("en-US-AriaNeural", "-5%"),
+ "Grave elegy": ("en-GB-RyanNeural", "-15%"),
+ "Cold expose": ("en-US-ChristopherNeural", "-8%"),
+ "Hushed suspense": ("en-GB-SoniaNeural", "-12%"),
+ "Hopeful storyteller": ("en-US-JennyNeural", "-5%"),
+}
+MOOD_ROT = list(MOODS.keys())
 ANGLES = {
  "Dark expose (default)": "Tone: dark investigative expose. Dopamine via outrage, justice, revelation.",
  "Mystery / curiosity": "Tone: puzzle-box mystery. Dopamine via curiosity loops and the final click of understanding.",
@@ -54,10 +70,17 @@ if "edits" not in st.session_state: st.session_state.edits = {}
 if "supporters" not in st.session_state:
     try: st.session_state.supporters = json.load(open(SUP_F)) if os.path.exists(SUP_F) else []
     except Exception: st.session_state.supporters = []
+if "decisions" not in st.session_state: st.session_state.decisions = []
 for _it in st.session_state.line:
     if _it["status"]=="rendered" and not os.path.exists(_it.get("out") or ""):
         _it["status"]="approved"; _it["err"]="media lost after app reboot — script kept, press render to redo"
 save_line(st.session_state.line)
+def decide(msg): st.session_state.decisions.append(msg)
+def mood_for(idx): return MOOD_ROT[idx % len(MOOD_ROT)]
+def row_html(i, total, topic, state, extra=""):
+    cls = {"queued":"todo","rendering":"now","done":"done","failed":"todo"}[state]
+    icon = {"queued":"🔒","rendering":"🎥","done":"✅","failed":"⚠️"}[state]
+    return f"<div class='card'>{icon} EP {i+1}/{total} · <b>{topic}</b> · <span class='chip {cls}'>{state}</span> {extra}</div>"
 
 # ---------------- HOUSE DNA ----------------
 DNA = """You are showrunner of SHADOW LEDGER, a prestige financial documentary series.
@@ -93,21 +116,50 @@ def qwen(prompt, sys=None):
 def wan_video_prompt(v): return (f"{v}. cinematic documentary film still, anamorphic 2.39:1, "
     "35mm grain, low-key chiaroscuro, crushed blacks, gold practicals, teal shadows, slow dolly, no text, no watermark")
 
-# ---------------- GENERATORS (REST + pure-Python voice: nothing to compile) ----------------
+# ---------------- VOICE CHAIN: CosyVoice (best) -> Edge Neural (free, top) -> gTTS (free) ----------------
 def speak(text, voice, mood):
+    try:
+        import dashscope
+        from dashscope.audio.tts_v2 import SpeechSynthesizer
+        dashscope.base_http_api_url = "https://dashscope-intl.aliyuncs.com/api/v1"
+        dashscope.base_websocket_api_url = "wss://dashscope-intl.aliyuncs.com/api-ws/v1/inference"
+        for model, instr in (("cosyvoice-v2", MOODS[mood]), ("cosyvoice-v2", None), ("cosyvoice-v1", None)):
+            try:
+                kw = {"model": model, "voice": voice or "longanyang"}
+                if instr: kw["instruction"] = instr
+                b = SpeechSynthesizer(**kw).call(text)
+                if b:
+                    st.session_state["voice_engine"] = f"CosyVoice ({model}) — premium"
+                    return b
+            except Exception:
+                continue
+    except Exception:
+        pass
+    try:
+        import edge_tts, asyncio
+        v, r = EDGE_VOICES.get(mood, ("en-US-GuyNeural", "-10%"))
+        p = f"{TMP}/edge_{hashlib.md5((text+mood).encode()).hexdigest()}.mp3"
+        asyncio.run(edge_tts.Communicate(text, v, rate=r).save(p))
+        st.session_state["voice_engine"] = "Edge Neural (free, studio-grade)"
+        return open(p, "rb").read()
+    except Exception:
+        pass
     from gtts import gTTS
     p = f"{TMP}/gtts_{hashlib.md5((text+mood).encode()).hexdigest()}.mp3"
     gTTS(text=text, lang="en").save(p)
+    st.session_state["voice_engine"] = "Google gTTS (free)"
     return open(p, "rb").read()
+
 def _task(tid):
     return requests.get(f"{BASE}/tasks/{tid}", headers={"Authorization": f"Bearer {DASH}"}).json()
-def wan_video(prompt):
+def wan_video(prompt, tick=None):
     r = requests.post(f"{BASE}/services/aigc/video-generation/video-synthesis",
         headers={"Authorization": f"Bearer {DASH}", "Content-Type": "application/json", "X-DashScope-Async": "enable"},
         json={"model":"wan2.1-t2v-turbo","input":{"prompt":prompt},"parameters":{"size":"1280*720"}}).json()
     tid = r["output"]["task_id"]
     for _ in range(150):
         time.sleep(4)
+        if tick: tick()
         q = _task(tid); stt = q["output"]["task_status"]
         if stt == "SUCCEEDED": return q["output"]["video_url"]
         if stt in ("FAILED","CANCELED"): raise RuntimeError("video task failed")
@@ -325,7 +377,7 @@ def sponsor_blocks(sp, voice, mood):
     b.append((ImageClip(card_img("NOW, BACK TO", "the investigation")).with_duration(2.5), silence(2.5), None))
     return b
 
-def render(sc, topic, series, pilot, music, voice, mood, sp=None, prog=None, angle="Dark expose (default)", supporters=None):
+def render(sc, topic, series, pilot, music, voice, mood, sp=None, prog=None, angle="Dark expose (default)", supporters=None, tick=None):
     def P(p, t):
         if prog: prog(min(p,1.0), t)
     scenes = sc["scenes"][:4] if pilot else sc["scenes"]
@@ -337,7 +389,7 @@ def render(sc, topic, series, pilot, music, voice, mood, sp=None, prog=None, ang
         vu = None
         for _try in range(2):
             try:
-                vu = wan_video(wan_video_prompt(s["visual"])); break
+                vu = wan_video(wan_video_prompt(s["visual"]), tick=tick); break
             except Exception: vu = None
         if not vu: vu = pexels_clip(" ".join(s["visual"].split()[:8]))
         vc = VideoFileClip(fetch(vu,f"c{i}.mp4")).without_audio().resized((1280,720)).with_fps(24)
@@ -364,7 +416,7 @@ def render(sc, topic, series, pilot, music, voice, mood, sp=None, prog=None, ang
         if txt: markers.append(t); srt.append((t, t+ac.duration, txt))
         t += ac.duration
     vid = concatenate_videoclips(vids)
-    aud = concatenate_videoclips(auds)
+    aud = concatenate_audioclips(auds)
     layers_a = [aud]
     if music:
         mc = AudioFileClip(music); nn2 = int(vid.duration//mc.duration)+1
@@ -423,7 +475,8 @@ CHECKLIST = """YOUTUBE UPLOAD CHECKLIST — SHADOW LEDGER (keep the boss happy)
 """
 RIGHTS = """RIGHTS RECORD — SHADOW LEDGER
 Footage: Pexels-licensed stock video + original AI-generated clips (Wan2.1, Alibaba Model Studio).
-Voice: licensed neural TTS APIs. Music: ORIGINAL procedural score (synthesized in-studio, zero third-party rights).
+Voice: licensed neural TTS APIs (CosyVoice) with free neural fallbacks (Microsoft Edge / Google).
+Music: ORIGINAL procedural score (synthesized in-studio, zero third-party rights).
 Sponsor segments: supplied by sponsor or produced with disclosure. Script: original AI-assisted editorial commentary
 on publicly documented events. Case File dossier: original compilation of public-source facts. Brand/logo/cards: original.
 This record supports any copyright or monetization dispute.
@@ -463,9 +516,10 @@ def pack_entries(it, ep, support, shop, series):
          + SHOP_BLURB.format(topic=f"#{ep} — {it['topic']}")).encode(), False))
     entries.append(("upload_checklist.txt", CHECKLIST.format(sp=f"YES — {it['sp']} (tick paid promotion + disclose)" if it.get("sp") else "No").encode(), False))
     entries.append(("rights_record.txt", RIGHTS.encode(), False))
+    entries.append(("decisions_log.txt", "\n".join(st.session_state.decisions).encode(), False))
     return entries, safe
 
-# ---------------- UI (MISSION CONTROL v23) ----------------
+# ---------------- UI (MISSION CONTROL v26) ----------------
 st.set_page_config(page_title="Shadow Ledger Studio", page_icon="🎬", layout="wide")
 st.markdown("""<style>
  .stApp{background:#0b0e13}
@@ -504,17 +558,24 @@ if st.session_state.get("last_fail"):
 support = st.sidebar.text_input("☕ Support link (Ko-fi)", "https://ko-fi.com/shadowledger")
 shop = st.sidebar.text_input("📄 Case File shop link (Phase 2 — leave blank for now)", "")
 ep_num = st.sidebar.text_input("Episode # (auto-names PDF/thumbs)", "001")
-voice = st.sidebar.text_input("Narrator voice (CosyVoice v2 ID)", "longanyang")
-mood = st.sidebar.selectbox("Narration mood", list(MOODS))
+voice = st.sidebar.text_input("Narrator voice ID (CosyVoice)", "longanyang")
+mood = st.sidebar.selectbox("Narration mood (manual)", list(MOODS))
+auto_mood = st.sidebar.checkbox("🎭 Auto-rotate mood per episode (recommended)", True)
 if st.sidebar.button("🔊 Hear 10s voice audition"):
     try:
         ab = f"{TMP}/audition.mp3"
         open(ab,"wb").write(speak("In 2019, a single signature moved forty-one billion dollars. Nobody noticed. Until now.", voice, mood))
         st.sidebar.audio(ab)
+        st.sidebar.caption(f"🎙️ Engine used: {st.session_state.get('voice_engine','unknown')}")
     except Exception as e:
-        st.sidebar.error(f"🔇 Audition unavailable right now: {str(e)[:80]} — the render uses the free fallback voice automatically.")
+        st.sidebar.error(f"🔇 Audition unavailable right now: {str(e)[:80]}")
 music = st.sidebar.file_uploader("House score (optional)", type=["mp3","wav"])
 series = st.sidebar.text_input("Series brand", "The Monopoly Files")
+with st.sidebar.expander("🧠 Director's decisions (live log)"):
+    if st.session_state.decisions:
+        for d in st.session_state.decisions[-14:]: st.caption("• " + d)
+    else:
+        st.caption("The studio explains every automatic choice here as it works.")
 adv = balance_advice(line)
 angle_list = list(ANGLES)
 angle = st.sidebar.selectbox("Story angle", angle_list, index=angle_list.index(adv) if adv in angle_list else 0)
@@ -576,6 +637,7 @@ with tab2:
                 st.session_state.splan = series_plan(line[0]["topic"])
             if c2.button("⏭️ Standalone episode — skip series"):
                 st.session_state.series_checked = True; st.session_state.splan = None
+                decide("Series check skipped — standalone episode by CEO choice.")
             if st.session_state.get("splan"):
                 spn = st.session_state.splan
                 st.markdown(f"**Verdict:** {'✅ YES — a series!' if spn['series'] else '❌ standalone is stronger'} — {spn['why']}")
@@ -586,21 +648,27 @@ with tab2:
                             line.append({"topic":e,"score":line[0]["score"],"tag":"SERIES","status":"queued","script":None,"gate":None,"out":None,"srt":None,"err":"","angle":None,"sp":""})
                     save_line(line)
                     st.session_state.series_checked = True
+                    decide(f"Series approved by planner: {spn['why']}")
                     st.success("✅ STEP 3 complete — series added. ➡️ NEXT: STEP 4 below.")
         if flags["series"]:
             st.markdown("## STEP 4 · Script + 🛡️ Quality Gate + 🚨 YouTube Guard")
-            st.caption("🟢 READY for STEP 4 — writes script + runs the Gate in one press.")
+            st.caption("🟢 READY for STEP 4 — the Gate double-checks slop, legal safety, YouTube ad policy, clickbait and pacing; you supervise at STEP 5.")
             if any(i["status"]=="queued" for i in line):
                 if st.button("📜 STEP 4 · Write script + run Quality Gate"):
                     it = next(x for x in line if x["status"]=="queued")
+                    idx_abs = line.index(it)
+                    m_use = mood_for(idx_abs) if auto_mood else mood
+                    a_use = it.get("angle") or angle
+                    decide(f"EP{idx_abs+1} '{it['topic'][:28]}' → angle {a_use} ({'balance advisor' if adv else 'CEO pick'}); mood {m_use} ({'auto-rotate for variety' if auto_mood else 'CEO pick'}).")
                     bar = st.progress(0.2, text="✍️ Writing Netflix-DNA script…")
-                    it["angle"] = angle
-                    it["script"] = write_script(it["topic"], series, angle)
+                    it["angle"] = a_use
+                    it["script"] = write_script(it["topic"], series, a_use)
                     bar.progress(0.6, text="🛡️ Gate + 🚨 YouTube policy review…")
                     try:
                         g = quality_gate(it["topic"], it["script"])
                         it["script"] = apply_gate(it["script"], g)
                         it["gate"] = g
+                        decide(f"EP{idx_abs+1} Gate: slop-clean {g.get('slop_clean','-')}/100, legal fixes {g.get('legal_flags_fixed','-')}, yt-policy {g.get('yt_policy','-')}.")
                     except Exception as e:
                         it["gate"] = {"pacing": f"gate skipped: {str(e)[:80]}"}
                     it["status"] = "scripted"; save_line(line)
@@ -633,6 +701,7 @@ with tab2:
                     nn, vv = st.session_state.edits.get(i2, (s["narration"], s["visual"]))
                     s["narration"], s["visual"] = nn, vv
                 cur["status"] = "approved"; save_line(line)
+                decide(f"EP '{cur['topic'][:28]}' approved by CEO at Director's Cut.")
                 st.success("✅ STEP 5 complete — approved. ➡️ NEXT: optional extras below, then STEP 6 Render.")
         if flags["approve"]:
             st.markdown("## STEP 6 · Render (live progress bar)")
@@ -653,6 +722,14 @@ with tab2:
             if st.button("🎬 STEP 6 · Render episode"):
                 it = next((x for x in line if x["status"]=="approved"), None)
                 if it:
+                    idx_abs = line.index(it)
+                    m_use = mood_for(idx_abs) if auto_mood else mood
+                    row = st.empty()
+                    t0 = time.time(); scenes_n = len(it["script"]["scenes"][:4] if pilot else it["script"]["scenes"])
+                    def tickfn():
+                        el = int(time.time()-t0); eta = max(0, scenes_n*100-el)
+                        bar10 = min(10, el//30)
+                        row.markdown(row_html(idx_abs, len(line), it["topic"], "rendering", f"⏱️ {el//60}m{el%60:02d}s · ⏳ ~{eta//60}m left · [{'▰'*bar10}{'▱'*(10-bar10)}]"), unsafe_allow_html=True)
                     bar = st.progress(0.05, text="🚀 Starting render…")
                     try:
                         mp3 = None
@@ -661,24 +738,32 @@ with tab2:
                         sp = st.session_state.get("sponsor")
                         it["sp"] = sp["name"] if (sp and sp.get("approved")) else ""
                         sups = st.session_state.supporters or None
-                        out, srt = render(it["script"], it["topic"], series, pilot, mp3, voice, mood, sp, prog=bar.progress, angle=it.get("angle") or "Dark expose (default)", supporters=sups)
+                        out, srt = render(it["script"], it["topic"], series, pilot, mp3, voice, m_use, sp, prog=bar.progress, angle=it.get("angle") or "Dark expose (default)", supporters=sups, tick=tickfn)
                         it["out"], it["srt"], it["status"], it["err"] = out, srt, "rendered", ""
                         save_line(line)
                         st.session_state.last_fail = None
+                        el = int(time.time()-t0)
+                        row.markdown(row_html(idx_abs, len(line), it["topic"], "done", f"finished in {el//60}m{el%60:02d}s · voice: {st.session_state.get('voice_engine','?')}"), unsafe_allow_html=True)
+                        decide(f"EP{idx_abs+1} rendered in {el//60}m — mood {m_use}, angle {it.get('angle')}, voice {st.session_state.get('voice_engine','?')}.")
                         st.video(out)
                         st.download_button("⬇️ Download this episode", open(out,"rb").read(), f"EPISODE_{ep_num}_{slug(it['topic'])}.mp4")
                         st.success("✅ STEP 6 complete — rendered successfully. ➡️ NEXT: downloads below or 📦 3·PUBLISH tab.")
                     except Exception as e:
                         it["status"], it["err"] = "failed", str(e)[:150]; save_line(line)
                         st.session_state.last_fail = "STEP 6 (Render)"
+                        row.markdown(row_html(idx_abs, len(line), it["topic"], "failed", str(e)[:60]), unsafe_allow_html=True)
                         st.error(f"Render failed (line saved — press Render to retry ONLY this step): {e}")
             st.markdown("### 🎬 SERIES MODE — render EVERYTHING left in the line (resumes automatically)")
-            st.caption("One click: scripts, gates and renders ALL remaining episodes in order, with a ✅ message after each. If it cuts out, press again — completed episodes are skipped. Plug in the charger, keep the tab open.")
+            st.caption("One click: scripts, gates and renders ALL remaining episodes. Each episode gets a live line (elapsed, ~time-left, filling bar, green ✅). Finished episodes appear as playable previews BELOW while the next one renders.")
             if st.button("🎬 RENDER ENTIRE LINE (resume-safe)"):
                 todo = [x for x in line if x["status"] != "rendered"]
                 done_n = len(line) - len(todo)
                 if done_n: st.info(f"♻️ Resuming: {done_n} episode(s) already complete — continuing with the rest.")
                 if not todo: st.success("🏁 Nothing left to render — all episodes complete. Download below.")
+                rows = {}
+                for i, it in enumerate(todo):
+                    rows[it["topic"]] = st.empty()
+                    rows[it["topic"]].markdown(row_html(line.index(it), len(line), it["topic"], "queued"), unsafe_allow_html=True)
                 mp3 = None
                 if music:
                     mp3 = f"{TMP}/house_{music.name}"; open(mp3,"wb").write(music.getbuffer())
@@ -686,22 +771,38 @@ with tab2:
                 sups = st.session_state.supporters or None
                 bar = st.progress(0.0, text="Starting series batch…")
                 for k, it in enumerate(todo):
+                    idx_abs = line.index(it)
+                    m_use = mood_for(idx_abs) if auto_mood else mood
+                    t0 = time.time()
                     try:
-                        bar.progress(k/max(len(todo),1), text=f"EP {k+1}/{len(todo)} · {it['topic'][:30]} — scripting…")
+                        bar.progress(k/max(len(todo),1), text=f"EP {k+1}/{len(todo)}: scripting…")
                         if not it["script"]:
                             it["angle"] = it.get("angle") or angle
+                            decide(f"EP{idx_abs+1} '{it['topic'][:28]}' → angle {it['angle']} ({'balance advisor' if adv else 'CEO pick'}); mood {m_use} ({'auto-rotate' if auto_mood else 'CEO pick'}).")
                             it["script"] = write_script(it["topic"], series, it["angle"])
                             try:
                                 g = quality_gate(it["topic"], it["script"]); it["script"] = apply_gate(it["script"], g); it["gate"] = g
+                                decide(f"EP{idx_abs+1} Gate: slop-clean {g.get('slop_clean','-')}/100, yt-policy {g.get('yt_policy','-')}, legal fixes {g.get('legal_flags_fixed','-')}.")
                             except Exception: pass
                         it["sp"] = sp["name"] if (sp and sp.get("approved")) else ""
-                        bar.progress((k+0.4)/max(len(todo),1), text=f"EP {k+1}/{len(todo)} · {it['topic'][:30]} — rendering…")
-                        out, srt = render(it["script"], it["topic"], series, pilot, mp3, voice, mood, sp, angle=it.get("angle") or "Dark expose (default)", supporters=sups)
+                        scenes_n = len(it["script"]["scenes"][:4] if pilot else it["script"]["scenes"])
+                        def tickfn():
+                            el = int(time.time()-t0); eta = max(0, scenes_n*100-el)
+                            bar10 = min(10, el//30)
+                            rows[it["topic"]].markdown(row_html(idx_abs, len(line), it["topic"], "rendering", f"⏱️ {el//60}m{el%60:02d}s · ⏳ ~{eta//60}m left · [{'▰'*bar10}{'▱'*(10-bar10)}]"), unsafe_allow_html=True)
+                        rows[it["topic"]].markdown(row_html(idx_abs, len(line), it["topic"], "rendering", "voicing + filming…"), unsafe_allow_html=True)
+                        out, srt = render(it["script"], it["topic"], series, pilot, mp3, voice, m_use, sp, angle=it.get("angle") or "Dark expose (default)", supporters=sups, tick=tickfn)
                         it["out"], it["srt"], it["status"], it["err"] = out, srt, "rendered", ""
                         save_line(line)
-                        st.success(f"✅ EP {k+1}/{len(todo)} — **{it['topic']}** complete. {'Starting next…' if k+1<len(todo) else 'Series finished!'}")
+                        el = int(time.time()-t0)
+                        rows[it["topic"]].markdown(row_html(idx_abs, len(line), it["topic"], "done", f"finished in {el//60}m{el%60:02d}s · mood {m_use}"), unsafe_allow_html=True)
+                        decide(f"EP{idx_abs+1} rendered in {el//60}m — voice {st.session_state.get('voice_engine','?')}.")
+                        st.caption(f"🎞️ PREVIEW EP {idx_abs+1} — play it now while the next episode renders:")
+                        st.video(out)
+                        st.success(f"✅ EP {k+1}/{len(todo)} — **{it['topic']}** complete in {el//60}m. {'Starting next…' if k+1<len(todo) else 'Series finished!'}")
                     except Exception as e:
                         it["status"], it["err"] = "failed", str(e)[:120]; save_line(line)
+                        rows[it["topic"]].markdown(row_html(idx_abs, len(line), it["topic"], "failed", str(e)[:60]), unsafe_allow_html=True)
                         st.error(f"⚠️ EP {k+1} failed ({str(e)[:80]}) — continuing with the next episode.")
                 bar.progress(1.0, text="Batch finished — download your series below, one file at a time.")
         rendered = [i for i in line if i["status"]=="rendered" and i["out"] and os.path.exists(i["out"])]
@@ -728,6 +829,7 @@ with tab2:
                 with zipfile.ZipFile(z,"w") as zf:
                     zf.writestr("SCHEDULE.txt", schedule_txt(base_n, len(rendered)).encode())
                     zf.writestr("SERIES_GUIDE.txt", ("Upload ALL episodes today as Private/Scheduled.\nYouTube Studio: Content → each video → Visibility → Schedule → use SCHEDULE.txt dates.\nConsistency (every Friday 16:00 EST) trains the algorithm and your audience.\nReply to every comment in hour 1. Post the community poll Wednesday before each Friday drop.").encode())
+                    zf.writestr("decisions_log.txt", "\n".join(st.session_state.decisions).encode())
                     for i3, it in enumerate(rendered):
                         ep = f"{base_n+i3:03d}"
                         zf.writestr(f"EP{ep}/subtitles.srt", srt_text(it["srt"]).encode())
@@ -760,6 +862,7 @@ with tabS:
             try:
                 ap = f"{TMP}/ad_audition.mp3"; open(ap,"wb").write(speak(sp_script, voice, mood))
                 st.audio(ap)
+                st.caption(f"🎙️ Engine used: {st.session_state.get('voice_engine','unknown')}")
             except Exception as e:
                 st.error(f"🔇 Audition unavailable right now: {str(e)[:80]}")
     sp_place = st.selectbox("Placement", ["After cold open + title (TV style)", "Before the final reveal"])
@@ -797,10 +900,10 @@ with tab3:
             st.json(safe)
 
 with tab4:
-    st.markdown("""**v23 MISSION CONTROL — dependency-free engine + bulletproof moviepy import.** Video/images via plain
-    REST, voice via pure-Python gTTS, concatenate imported through a 3-way safety chain. SERIES MODE talks to you
-    (✅ EP 1 done → starting EP 2…), resumes after crashes, downloads in SMALL PARTS with SCHEDULE.txt
-    (Fridays 16:00 EST). Plus: 🙏 supporter credits, 💼 Sponsor Suite, ✅/⭐/🔒 chips, READY captions, retry-only-failed,
-    auto-numbered shop-ready packs, Gate + YouTube Guard, rights record + checklist. **PHASED REVENUE:** ☕ tips now ·
-    📄 Case Files $5 next · 📚 affiliates later · 💼 sponsors + memberships + merch. **Roadmap:** PWA → native app →
-    OAuth upload → dubs → analytics loop.""")
+    st.markdown("""**v26 MISSION CONTROL — voice chain + full bug audit.** Voice: ① CosyVoice v2 (enable in Model Studio →
+    Model Marketplace → Speech → Activate; audition button reports the engine so you KNOW it works) → ② Microsoft Edge
+    Neural (free, studio-grade, per-mood accents) → ③ Google gTTS (free). Fixed: audio joiner crash, invalid gTTS codes,
+    RGBA compositing verified, size guards, pillow 10.4 pin compatible with moviepy+dashscope. Live episode board with
+    countdowns + playable previews · 🧠 decisions log · resume-safe SERIES MODE · Gate + YouTube Guard · small-part
+    downloads + SCHEDULE.txt. **You supervise; the line produces.** **PHASED REVENUE:** ☕ tips · 📄 Case Files $5 ·
+    📚 affiliates ·  sponsors + memberships. **Roadmap:** PWA → native app → OAuth upload → dubs → analytics loop.""")
