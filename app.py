@@ -158,7 +158,7 @@ def normalize_tts(t):
         except Exception: return m.group(0)
         return (w+" "+scale+" dollars").replace("  "," ").strip()
     t=re.sub(r"\$\s?([\d,]+(?:\.\d+)?)\s*(trillion|billion|million)?",money,t)
-    t=re.sub(r"([\d,]+)\s*(trillion|billion|million)\b",lambda m:(num_to_words(int(m.group(1).replace(',','')))+" "+m.group(2)),t)
+    t=re.sub(r"([\d,]+)\s*(trillion|billion|million)\b",lambda m:(num_to_words(int(m.group(1).replace(',',''))+" "+m.group(2)),t)
     t=re.sub(r"(\d+(?:\.\d+)?)\s*%",lambda m:(num_to_words(int(float(m.group(1))))+" percent"),t)
     return t
 def mood_for(i): return MOOD_ROT[i%len(MOOD_ROT)]
@@ -568,7 +568,7 @@ def ceo_pilot(msg):
         act=a.get("action"); line=load_line()
         if act=="hunt":
             res=hunt(a.get("theme","financial scandals"),int(a.get("min_score",80)))
-            outs.append(f"🎯 Queued {sum(1 for t,s,w in res if queue_topic(t,s,'HUNTED'))} topics.")
+            outs.append(f"🎯 Queued {sum(1 for t,s,w in res if queue_topic(t,s,"HUNTED"))} topics.")
         elif act=="queue":
             if queue_topic(a.get("topic",""),0,"CEO"): outs.append(f"➕ Queued: {a.get('topic')}")
         elif act in ("reject","cancel"):
@@ -613,8 +613,14 @@ def ost_img(text):
     d.text((640,80),text.upper(),font=F(72),fill=GOLD,anchor="mm",stroke_width=5,stroke_fill=(0,0,0))
     return np.array(img)
 def vost_img(text):
-    img=Image.new("RGBA",(1080,160),(0,0,0,0)); d=ImageDraw.Draw(img)
-    d.text((540,80),text.upper(),font=F(56),fill=GOLD,anchor="mm",stroke_width=5,stroke_fill=(0,0,0))
+    # PROFESSIONAL SHORTS TEXT (like InVideo)
+    img=Image.new("RGBA",(1080,100),(0,0,0,0)); d=ImageDraw.Draw(img)
+    # Wrap text to 30 chars (prevents cutoff)
+    lines = textwrap.wrap(text.upper(), 30)
+    y = 50
+    for line in lines:
+        d.text((540, y), line, font=F(36), fill=GOLD, anchor="mm", stroke_width=3, stroke_fill=(0,0,0))
+        y += 40
     return np.array(img)
 def pattern_interrupt(dur=0.6):
     img=Image.new("RGBA",(1280,720),(0,0,0,0)); d=ImageDraw.Draw(img)
@@ -752,7 +758,19 @@ def render(sc,topic,series,pilot,music,voice,mood,sp=None,angle="Dark expose (de
     L("🎞️ Cutting cold open → title → acts",0.75)
     title=(ImageClip(card_img("SHADOW LEDGER",f"{series} · {TONE_LABEL.get(angle,'A DARK EXPOSE')}")).with_duration(3),silence(3),None)
     adv=sc.get("advisory") or ""
-    advclip=(ImageClip(card_img("VIEWER NOTE",adv)).with_duration(3),silence(3),None) if adv else None
+    # SMALL TOP BANNER (like Bloomberg documentaries)
+    if adv:
+        adv_img = Image.new("RGB", (1280, 40), (8, 9, 12))
+        d = ImageDraw.Draw(adv_img)
+        # Wrap text to fit banner
+        lines = textwrap.wrap(adv, width=60)
+        y = 20
+        for line in lines:
+            d.text((640, y), line.upper(), font=F(20), fill=GOLD, anchor="mm")
+            y += 25
+        advclip=(ImageClip(np.array(adv_img)).with_duration(3),silence(3),None)
+    else:
+        advclip=None
     cred=(ImageClip(credits_img(supporters)).with_duration(4.5),silence(4.5),None) if supporters else None
     end=(ImageClip(card_img("SUBSCRIBE",sc.get("share_line") or "the next ledger opens soon")).with_duration(5),silence(5),None)
     base=[parts[0],title]+([advclip] if advclip else [])+parts[1:]
@@ -792,20 +810,22 @@ def shorts_blockbuster(vp,hooks,ep,voice,mood,cold_open):
     starts=[3,max(4,vd*0.35),max(5,vd*0.6)]
     for k,s0 in enumerate(starts):
         hk=hooks[k] if k<len(hooks) else "FOLLOW THE MONEY"
-        intro=ImageClip(vcard_img("SHADOW LEDGER",hk)).with_duration(1.6)
+        # CINEMATIC SHORTS INTRO (like InVideo)
+        intro=ImageClip(vcard_img("SHADOW LEDGER",hk)).with_duration(1.6).with_effects([vfx.FadeIn(0.5),vfx.FadeOut(0.5)])
         hook_txt=cold_open or hk
         ap=f"{TMP}/shook_{ep}_{k}.mp3"; open(ap,"wb").write(speak(hook_txt,voice,mood)); hac=AudioFileClip(ap)
         c=VideoFileClip(vp).subclipped(s0,min(s0+26,vd-2))
         c=c.resized(height=1920); w=c.size[0]
         c=c.cropped(x1=(w-1080)//2,x2=(w-1080)//2+1080)
-        ov=ImageClip(vost_img(hk)).with_duration(min(3,c.duration)).with_start(0.3).with_position((0,120))
-        body=CompositeVideoClip([c,ov])
-        endc=ImageClip(vcard_img("FULL FILM ON YOUTUBE","search: SHADOW LEDGER")).with_duration(2.2)
-        vis=concatenate_videoclips([intro,body,endc])
+        # TEXT THAT FOLLOWS NARRATION (like InVideo)
+        ov=ImageClip(vost_img(hk)).with_duration(min(3,c.duration)).with_start(0.3).with_position((0, 400))
+        # CINEMATIC END CARD (like InVideo)
+        endc=ImageClip(vcard_img("FULL FILM ON YOUTUBE","search: SHADOW LEDGER")).with_duration(2.2).with_effects([vfx.FadeIn(0.5)])
+        vis=CompositeVideoClip([c,ov])
         total=vis.duration
         bed=sound_bed(total,[1.6+1])
         hookclip=hac.with_start(1.6)
-        fin=vis.with_audio(CompositeAudioClip([bed.with_volume_scaled(0.4),hookclip]).with_duration(total))
+        fin=vis.with_audio(CompositeAudioClip([bed.with_volume_scaled(0.5),hookclip]).with_duration(total))
         p=f"{TMP}/shorts_{ep}_{k}.mp4"; fin.write_videofile(p,codec="libx264",audio_codec="aac",fps=24,logger=None)
         outs.append(p)
     return outs
@@ -814,8 +834,8 @@ def traffic_short(vp,hook):
     c=VideoFileClip(vp).subclipped(3,min(28,vd-6)); c=c.resized(height=1920); w=c.size[0]
     c=c.cropped(x1=(w-1080)//2,x2=(w-1080)//2+1080)
     intro=tiktok_intro(hook)
-    endc=ImageClip(vcard_img("FULL FILM ON YOUTUBE","search: SHADOW LEDGER")).with_duration(3)
-    vis=concatenate_videoclips([intro,CompositeVideoClip([c,ImageClip(vost_img(hook)).with_duration(min(4,c.duration)).with_start(3).with_position((0,120))]),endc])
+    endc=ImageClip(vcard_img("FULL FILM ON YOUTUBE","search: SHADOW LEDGER")).with_duration(2.2).with_effects([vfx.FadeIn(0.5)])
+    vis=CompositeVideoClip([intro,CompositeVideoClip([c,ImageClip(vost_img(hook)).with_duration(min(4,c.duration)).with_start(3).with_position((0,120))]),endc])
     total=vis.duration
     bed=sound_bed(total,[2.5+1])
     fin=vis.with_audio(bed.with_volume_scaled(0.4).with_duration(total))
