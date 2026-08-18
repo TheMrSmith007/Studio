@@ -1207,8 +1207,8 @@ with tab1:
     st.markdown("## 🎯 STEP 1: FIND HIGH-RPM TOPICS")
     st.caption("Auto-finds trending finance topics with USA/UK audience focus")
     
-    # GOLDEN GOOSE BUTTON (WITH UNIQUE KEY)
-    if st.button("🔍 SCAN YOUTUBE FOR HOT TOPICS", key="scan_button"):
+    # GOLDEN GOOSE BUTTON (UNIQUE KEY)
+    if st.button("🔍 SCAN YOUTUBE FOR HOT TOPICS", key="scan_topics_button"):
         with st.spinner("📡 Finding high-RPM finance topics..."):
             bull = refresh_bulletin(DEFAULT_SEEDS)
             st.session_state["bull"] = bull
@@ -1222,8 +1222,9 @@ with tab1:
             score_color = "green" if item["sc"] >= 80 else "orange" if item["sc"] >= 60 else "gray"
             st.markdown(f"**{item['t']}** · 🥚 `{item['sc']}/100` · `{item['src']}`")
             
-            # ADD BUTTON FOR EACH TOPIC (WITH UNIQUE KEY)
-            if st.button(f"➕ ADD '{item['t'][:30]}...'", key=f"add_{i}_{item['t'][:10]}"):
+            # ADD BUTTON FOR EACH TOPIC (UNIQUE KEY WITH TIMESTAMP)
+            topic_key = f"add_{i}_{hash(item['t']) % 10000}"
+            if st.button(f"➕ ADD '{item['t'][:30]}...'", key=topic_key):
                 jsave(LINE_F, [])  # Clear old episodes
                 queue_topic(item["t"], item["sc"], item["src"])
                 st.session_state.line = load_line()
@@ -1231,12 +1232,27 @@ with tab1:
     
     st.markdown("## 🧹 CLEAN SLATE TOOLS")
     c1, c2 = st.columns(2)
-    if c1.button("🆕 NEW PROJECT (CLEAR ALL)", key="new_project"):
+    if c1.button("🆕 NEW PROJECT (CLEAR ALL)", key="new_project_clear"):
         jsave(LINE_F, [])
         jsave(BIBLE_F, [])
         jsave(MET_F, [])
         st.session_state.line = []
         st.success("✅ Production line cleared")
+    
+    if c2.button("🔄 REFRESH FROM YOUTUBE", key="refresh_youtube_data"):
+        with st.spinner("Scanning your channel..."):
+            ups = yt_channel_uploads()
+            newl = []
+            for vid, title in ups:
+                if "shorts" not in title.lower() and "#shorts" not in title:
+                    newl.append({
+                        "topic": title,
+                        "status": "rendered",
+                        "yt_id": vid
+                    })
+            jsave(LINE_F, newl)
+            st.session_state.line = newl
+        st.success(f"✅ Restored {len(newl)} full episodes")
     
     if c2.button("🔄 REFRESH FROM YOUTUBE", key="refresh_yt"):
         with st.spinner("Scanning your channel..."):
