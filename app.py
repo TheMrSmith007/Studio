@@ -143,7 +143,7 @@ def chain(pat,fb):
         if f not in out: out.append(f)
     return out
 
-MOODS={"Calm investigator (default)":"low, calm, intimate documentary voice, slow deliberate pace, slightly breathy, grave tension, long pause before every reveal",
+MOODS={"Calm investigator (default)":"low, calm, intimate documentary voice, slow deliberate pace, slightly breathy, grave tension, LONG PAUSE before every reveal, whisper on key facts",
 "Concerned witness":"worried, urgent, leaning in, slightly trembling with concern, as if warning a friend",
 "Grave elegy":"mournful, heavy, slow, deep pauses, the voice of a eulogy",
 "Cold expose":"clinical, sharp, controlled anger, precise diction, ice-cold delivery",
@@ -389,14 +389,40 @@ def golden_egg(topic):
     total = min(100, demand+fresh+comp+bo+geo_bonus)
     return total, f"demand {demand}/45 · geo {geo_bonus} · proof {bo}/15"
 
-DNA="""You are showrunner of SHADOW LEDGER, a prestige financial documentary series.
-Topic: {topic}. Series: {series}. ANGLE: {angle}
-SERIES MEMORY: {bible}
-CEO PREFERENCES (obey these): {prefs}
-STRUCTURE: 1. COLD OPEN + VIEWER STAKES (first 15s - MUST mention US/UK/AU impact). 2. ACT I SUSPECT. 3. ACT II MACHINE (open loop every 90s). 4. ACT III REVEAL. 5. OPEN QUESTION + CTA + BINGE-PITCH (reference prior episode if series).
-RULES: present tense, short cinematic sentences, NO ACCUSATIONS (alleged/documents show), concrete specifics (include numbers), max 3 sentences/scene. MUST include: 'Alleged documents show...' or 'Records indicate...'.
-ANTI-SLOP: BANNED: delve, tapestry, landscape, game-changer, uncover the truth, you should.
-OUTPUT JSON: {{"title_options":[3],"hook_words":"MAX 4 WORDS","share_line":"max 10 words","scenes":[{{"narration":"","visual":"","ost":""}}],"pinned_question":"","binge_pitch":"","community_poll":{{"q":"","a":["",""]}},"cold_open_A":"max 20 words","cold_open_B":"max 20 words"}}"""
+# CRITICAL FIX: STORYTELLING DNA PROMPT
+DNA="""You are David Attenborough meets Michael Lewis — a master storyteller revealing hidden financial truths.
+TOPIC: {topic}
+SERIES: {series}
+ANGLE: {angle}
+
+RULES:
+1. OPEN WITH A HOOK: "What if I told you [SHOCKING FACT]?" or "Imagine [VIVID SCENARIO]"
+2. USE ACTIVE VOICE: "BlackRock bought 47,000 homes" (not "Alleged documents show...")
+3. ADD EMOTIONAL STAKES: "This affects YOUR rent in Atlanta"
+4. INCLUDE SPECIFIC NUMBERS: "47,000 homes", "$8B portfolio"
+5. BUILD TENSION: "But the truth is worse..." → "Here's what they don't want you to know"
+6. END WITH BINGE-PITCH: "Next week: The teacher who out-traded Wall Street"
+
+STRUCTURE:
+- COLD OPEN (15s): Viewer stakes + shocking hook
+- ACT I (5 min): The suspect (who? how much?)
+- ACT II (10 min): The machine (how it really works)
+- ACT III (5 min): The reveal (documents prove...)
+- CTA (2 min): Open question + binge-pitch
+
+OUTPUT JSON: {{
+    "title_options": ["MAX 60 chars"],
+    "hook_words": "MAX 4 WORDS",
+    "share_line": "max 10 words",
+    "scenes": [
+        {{"narration": "ACTIVE VOICE SENTENCE", "visual": "cinematic shot description", "ost": ""}}
+    ],
+    "pinned_question": "PROVOCATIVE QUESTION",
+    "binge_pitch": "NEXT EPISODE TEASE",
+    "community_poll": {{"q": "POLL QUESTION", "a": ["OPTION A", "OPTION B"]}},
+    "cold_open_A": "max 20 words HOOK",
+    "cold_open_B": "max 20 words ALTERNATE HOOK"
+}}"""
 
 GATE="""You are SHADOW LEDGER's executive editor + legal + YouTube policy officer. Review script JSON: {script}
 FIX slop/legal/viewer-stakes/dragging/clickbait/AdSense. Return JSON {{"slop_clean":0-100,"emotion":0-100,"viewer_stakes":"","legal_flags_fixed":N,"yt_policy":"clean|fixed","clickbait":"clean|fixed","advisory":"","pacing":"","scenes":[same schema],"title_options":[],"share_line":"","cold_open_A":"","cold_open_B":""}}"""
@@ -479,7 +505,8 @@ def estimate(sc,pilot):
     sc_=sc["scenes"][:4] if pilot else sc["scenes"]; chars=sum(len(s["narration"]) for s in sc_)
     return int(chars/14)+8+len(sc_), len(sc_)*0.06+chars*0.00003
 def _scene_clip(visual,footage,idx):
-    q=" ".join([w for w in visual.split() if len(w)>3][:8]) or "cinematic documentary b-roll"
+    # CRITICAL FIX: SPECIFIC VISUAL PROMPTS
+    q=f"cinematic drone shot of {visual.split('.')[0]} — specific location, golden hour, teal shadows"
     vu=None
     for src in (pexels_clip,pixabay_clip):
         try:
@@ -1172,109 +1199,50 @@ angle_list=list(ANGLES)
 angle=st.sidebar.selectbox("Story angle",angle_list,index=angle_list.index(adv) if adv in angle_list else 0)
 jsave(SET_F,{"series":series,"pilot":False,"auto_mood":auto_mood,"mood":mood,"angle":angle,"voice":voice,"music":music_path,"support":support,"ep_day":ep_day,"ep_time":ep_time,"sh_day":sh_day,"sh_time":sh_time,"manual":manual,"interrupts":interrupts,"footage":FMAP[footage_sel],"voice_mode":("premium" if voice_mode.startswith("PREMIUM") else "free")})
 
-# CRITICAL FIX: SINGLE TAB SET (NO DUPLICATES)
+# SINGLE TAB SET
 tab1,tab2,tabS,tab3,tab4,tab5=st.tabs(["🥚 1·SCAN","🏭 2·PRODUCE","💼 SPONSOR","📦 3·PUBLISH","📈 STRATEGY","👹 AUTO MONSTER"])
 
-def guide(steps):
-    html=""; nxt=False
-    for name,done in steps:
-        if done: cls="done"; lab="✅"
-        elif not nxt: cls="next"; lab="👉"; nxt=True
-        else: cls=""; lab="•"
-        html+=f"<span class='gchip {cls}'>{lab} {name}</span>"
-    st.markdown(html,unsafe_allow_html=True)
-
+# MINIMAL SCAN TAB
 with tab1:
-    with st.expander("🧭 HOW TO USE — 2-minute tour (for anyone)",expanded=not line):
-        st.markdown("""1️⃣ **SCAN** → refresh bulletin + Golden Egg scan, tick winners, add to line.
-2️⃣ **PRODUCE** → series plan, script+gate, approve, RENDER (cloud, auto-uploads).
-3️⃣ **PUBLISH** → build ZIP (Shorts/TikTok/Case File) + watch links.
-🔁 **Memory:** auto-saves to Vault; on reopen restores or rebuilds from YouTube.
-🆘 **Lost?** sidebar → 'Recover / rebuild from YouTube' or 'Restore line from Vault'.""")
-    bull_items=jload(BULL_F,{}).get("items",[])
-    guide([("1 BULLETIN",bool(bull_items)),("2 SCAN",bool(st.session_state.get("scan"))),("3 ADD",bool(line)),("4+ PRODUCE ➔",bool(line))])
-    st.markdown("<div class='section'>🗺️ START HERE — follow the glowing step</div>",unsafe_allow_html=True)
-    if "seeds_str" not in st.session_state: st.session_state.seeds_str=load_seeds()
-    pa=st.session_state.pop("seed_add",None)
-    if pa and pa not in st.session_state.seeds_str: st.session_state.seeds_str+="\n"+pa
-    pm=st.session_state.pop("seed_add_multi",None)
-    if pm:
-        cur=set(st.session_state.seeds_str.splitlines())
-        for t in pm:
-            if t not in cur: st.session_state.seeds_str+="\n"+t
-    with st.expander("📰 WHAT'S HOT — live bulletin",expanded=True):
-        b=jload(BULL_F,{})
-        if b.get("ts"):
-            ago=datetime.now()-datetime.fromisoformat(b["ts"]); st.caption(f"🕒 Last refreshed {ago.days}d {ago.seconds//3600}h ago")
-        if st.button("1️⃣ REFRESH BULLETIN (listen to YouTube)"):
-            try:
-                with st.spinner("📡 Listening…"): st.session_state["bull"]=refresh_bulletin(st.session_state.seeds_str)
-            except Exception as e:
-                st.error(f"📡 Bulletin hit a wall: {str(e)[:120]} — try again in a minute.")
-        for i in (st.session_state.get("bull") or bull_items)[:10]:
-            tag="🔥" if i["sc"]>=80 else "⭐" if i["sc"]>=60 else "•"
-            score_txt=f" — 🥚 {i['sc']}/100" if i["sc"] else ""
-            c1,c2,c3=st.columns([4,1,1])
-            c1.markdown(f"{tag} **{i['t']}**{score_txt} · `{i['src']}`")
-            if c2.button("➕",key=f"bq_{i['t']}"): queue_topic(i["t"],i["sc"],i["src"])
-            if c3.button("📋",key=f"bs_{i['t']}"): st.session_state["seed_add"]=i["t"]
-        if st.button("2️⃣ SEND ALL ≥70 TO SCAN SEEDS"):
-            cur=[x for x in st.session_state.seeds_str.splitlines() if x.strip()]
-            st.session_state["seed_add_multi"]=[i["t"] for i in (st.session_state.get("bull") or bull_items) if i["sc"]>=70 and i["t"] not in cur]
-            st.success("✅ Sent to Scan box.")
-    seeds=st.text_area("Seed topics (your ideas + hot topics)",st.session_state.seeds_str)
-    st.session_state.seeds_str=seeds
-    if st.button("3️⃣ STEP 1 · GOLDEN EGG SCAN"):
-        save_seeds(seeds)
-        with st.spinner(" Scanning…"):
-            st.session_state.scan=sorted([(s,golden_egg(s)[0],golden_egg(s)[1]) for s in [x for x in seeds.splitlines() if x.strip()]],key=lambda r:-r[1])
-            jsave(SCAN_F, st.session_state.scan)
-    if st.session_state.get("scan") and len(st.session_state.get("scan",[]))>0:
-        sc0=st.session_state.scan
-        st.markdown(f"<div class='card winner'>🏆 WINNER: <b>{sc0[0][0]}</b> — 🥚 {sc0[0][1]/100} (pre-ticked below)</div>",unsafe_allow_html=True)
-        picks=[]
-        for j,(t,sc,w) in enumerate(sc0):
-            if st.checkbox(f"{'🏆 ' if j==0 else ''}{t}  (🥚 {sc}/100)",value=(j==0),key=f"ck1_{t}"): picks.append((t,sc))
-        if st.button("➕ ADD TICKED TO PRODUCTION LINE"):
-            for t,sc in picks: queue_topic(t,sc,"")
-            st.session_state.line=load_line()
-            st.success("✅ Added — go to 🏭 2·PRODUCE.")
-    st.markdown("<div class='section'>🧠 INTELLIGENCE SECTION — boost your scores</div>",unsafe_allow_html=True)
-    with st.expander("🎯 Hunt 80+ engine"):
-        ht=st.text_input("Theme to hunt","global financial scandals, monopolies, comebacks")
-        hm=st.number_input("Min score",50,100,80,5)
-        if st.button("🎯 HUNT HIGH SCORERS"):
-            try: st.session_state["hunt_res"]=hunt(ht,int(hm))
-            except Exception as e: st.error(f"Hunt hiccup: {str(e)[:100]}")
-        hr=st.session_state.get("hunt_res",[])
-        if hr==[]: st.caption("No topics at that score — lower Min score or broaden the theme. Results appear just below.")
-        for t,sc,why in hr:
-            st.markdown(f"**🔥 {t}** — 🥚 {sc}/100")
-            if st.button(f"➕ Queue {t[:40]}",key=f"hq_{t}"): queue_topic(t,sc,"HUNTED")
-    with st.expander("🔮 Trend Anticipation"):
-        stt=st.text_input("Seed to predict","BlackRock")
-        if st.button("🔮 PREDICT SPIKES"): st.session_state["spikes"]=predict_spikes(stt)
-        for t,sc,why in st.session_state.get("spikes",[])[:6]:
-            st.markdown(f"**{'🔥' if sc>70 else '⭐'} {t}** — 🥚 {sc}/100")
-            if st.button("➕",key=f"aq_{t}"): queue_topic(t,sc,"ANTICIPATED")
-    with st.expander("📊 Analytics loop (studio learns)"):
-        if os.path.exists(YT_TOK_F) or YT_RT:
-            vids=[(i.get("yt_id"),i.get("angle"),i["topic"]) for i in line if i.get("yt_id")]
-            if vids and st.button("FETCH 48H METRICS"):
-                for vid,a,t in vids:
-                    m=yt_metrics(vid)
-                    if m:
-                        met=jload(MET_F,{}); met[vid]={**m,"angle":a,"topic":t}; jsave(MET_F,met)
-                        st.caption(f"• {t[:25]}: CTR {m['ctr']}%")
-                        hof_update(vid,(m.get("views",0)/1000)+(float(m.get("ctr") or 0)*5))
-                st.success("✅ Learned.")
-    with st.expander("🏆 Hall of Fame + auto-sequel"):
-        h=jload(HOF_F,[])
-        if h:
-            st.markdown(f"**🏆 Top:** score {hof_best()['score']:.1f}")
-            if st.button("🎬 QUEUE SEQUEL"):
-                tt=next((m.get("topic") for v,m in jload(MET_F,{}).items() if v==hof_best()["vid"]),None)
-                if tt: queue_topic(f"Sequel to: {tt}",80,"HOF")
+    st.markdown("## 🎯 STEP 1: ADD YOUR TOPIC")
+    st.caption("Enter ONE finance topic. Example: 'BlackRock buying housing'")
+    
+    topic = st.text_input("Finance documentary topic", "BlackRock buying housing")
+    
+    if st.button("➕ ADD TO PRODUCTION LINE"):
+        if topic.strip():
+            # FORCE CLEAN SLATE: CLEAR ALL OLD EPISODES
+            jsave(LINE_F, [])
+            queue_topic(topic.strip(), 85, "MANUAL")
+            st.session_state.line = load_line()
+            st.success(f"✅ Added '{topic}' — go to 🏭 2·PRODUCE")
+        else:
+            st.warning("⚠️ Enter a topic first")
+    
+    st.markdown("## 🧹 CLEAN SLATE TOOLS")
+    c1, c2 = st.columns(2)
+    if c1.button("🆕 NEW PROJECT (CLEAR ALL)"):
+        jsave(LINE_F, [])
+        jsave(BIBLE_F, [])
+        jsave(MET_F, [])
+        st.session_state.line = []
+        st.success("✅ Production line cleared")
+    
+    if c2.button("🔄 REFRESH FROM YOUTUBE"):
+        with st.spinner("Scanning your channel..."):
+            ups = yt_channel_uploads()
+            newl = []
+            for vid, title in ups:
+                # ONLY RESTORE FULL EPISODES (NOT SHORTS)
+                if "shorts" not in title.lower() and "#shorts" not in title:
+                    newl.append({
+                        "topic": title,
+                        "status": "rendered",
+                        "yt_id": vid
+                    })
+            jsave(LINE_F, newl)
+            st.session_state.line = newl
+        st.success(f"✅ Restored {len(newl)} full episodes")
 
 with tab2:
     st.markdown("## 8️⃣ STEP 6 · Render (cloud background)")
