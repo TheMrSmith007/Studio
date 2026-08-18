@@ -1202,22 +1202,32 @@ jsave(SET_F,{"series":series,"pilot":False,"auto_mood":auto_mood,"mood":mood,"an
 # SINGLE TAB SET
 tab1,tab2,tabS,tab3,tab4,tab5=st.tabs(["🥚 1·SCAN","🏭 2·PRODUCE","💼 SPONSOR","📦 3·PUBLISH","📈 STRATEGY","👹 AUTO MONSTER"])
 
-# MINIMAL SCAN TAB
+# GOLDEN GOOSE SCANNER TAB
 with tab1:
-    st.markdown("## 🎯 STEP 1: ADD YOUR TOPIC")
-    st.caption("Enter ONE finance topic. Example: 'BlackRock buying housing'")
+    st.markdown("## 🎯 STEP 1: FIND HIGH-RPM TOPICS")
+    st.caption("Auto-finds trending finance topics with USA/UK audience focus")
     
-    topic = st.text_input("Finance documentary topic", "BlackRock buying housing")
+    # GOLDEN GOOSE BUTTON
+       if st.button("🔍 SCAN YOUTUBE FOR HOT TOPICS"):
+        with st.spinner("📡 Finding high-RPM finance topics..."):
+            bull = refresh_bulletin(DEFAULT_SEEDS)
+            st.session_state["bull"] = bull
+            st.success(f"✅ Found {len(bull[:12])} hot topics")
     
-    if st.button("➕ ADD TO PRODUCTION LINE"):
-        if topic.strip():
-            # FORCE CLEAN SLATE: CLEAR ALL OLD EPISODES
-            jsave(LINE_F, [])
-            queue_topic(topic.strip(), 85, "MANUAL")
-            st.session_state.line = load_line()
-            st.success(f"✅ Added '{topic}' — go to 🏭 2·PRODUCE")
-        else:
-            st.warning("⚠️ Enter a topic first")
+    # SHOW TOPICS (ONLY IF SCANNED)
+    bull_items = st.session_state.get("bull", [])
+    if bull_items:
+        st.markdown("### 🔥 TOP WINNERS (High RPM + Trending)")
+        for i, item in enumerate(bull_items[:6]):  # Show top 6
+            score_color = "green" if item["sc"] >= 80 else "orange" if item["sc"] >= 60 else "gray"
+            st.markdown(f"**{item['t']}** · 🥚 `{item['sc']}/100` · `{item['src']}`")
+            
+            # ADD BUTTON FOR EACH TOPIC
+            if st.button(f"➕ ADD '{item['t'][:30]}...'", key=f"add_{i}"):
+                jsave(LINE_F, [])  # Clear old episodes
+                queue_topic(item["t"], item["sc"], item["src"])
+                st.session_state.line = load_line()
+                st.success(f"✅ Added '{item['t']}' — go to 🏭 2·PRODUCE")
     
     st.markdown("## 🧹 CLEAN SLATE TOOLS")
     c1, c2 = st.columns(2)
@@ -1233,7 +1243,6 @@ with tab1:
             ups = yt_channel_uploads()
             newl = []
             for vid, title in ups:
-                # ONLY RESTORE FULL EPISODES (NOT SHORTS)
                 if "shorts" not in title.lower() and "#shorts" not in title:
                     newl.append({
                         "topic": title,
@@ -1379,6 +1388,41 @@ with tab4:
     reveal, black tension beats, pauses, color grade). Spend-guard caps cost. Permanent memory + recover. This is the
     channel that makes free tools look like a million dollars. 🎬""")
 
+def auto_monster(months=3):
+    JOB=job_load(); JOB["running"]=True; job_save(JOB); vault_save_job(JOB)
+    ramp=ramp_state_load()
+    ramp["auto_mode"]=True
+    ramp["target_eps"]=30 * months
+    ramp_state_save(ramp)
+    
+    try:
+        st.info(f"🤖 Generating {ramp['target_eps']} episodes ({months} months)...")
+        line=load_line()
+        
+        # AUTO-MODE USES GOLDEN GOOSE SCANNER
+        while len(line) < ramp["target_eps"]:
+            bull=refresh_bulletin(DEFAULT_SEEDS)
+            top_topic = bull[0]["t"] if bull else f"Finance scandal #{len(line)+1}"
+            
+            series_plan = qwen(f"Prestige documentary topic: {top_topic}. Return JSON {{'episodes':[3]}}")
+            for ep_title in series_plan.get("episodes", [top_topic]):
+                if len(line) >= ramp["target_eps"]: break
+                queue_topic(ep_title, 80, "AUTO_MONSTER")
+            line=load_line()
+        
+        batch_worker(auto_upload=True, auto_schedule=True, auto_feed=True)
+        
+        ramp["auto_mode"]=False
+        ramp_state_save(ramp)
+        JOB["log"].append(f"✅ AUTO MONSTER COMPLETE: {ramp['target_eps']} episodes scheduled")
+        st.success(f"🎬 {months}-MONTH CONTENT MACHINE COMPLETE!")
+        
+    except Exception as e:
+        JOB["log"].append(f"⚠️ Auto Monster failed: {str(e)[:100]}")
+        st.error(f"Monster hiccup: {str(e)[:100]}")
+    finally:
+        JOB["running"]=False; job_save(JOB); vault_save_job(JOB)
+
 with tab5:
     st.markdown("## 👹 AUTO MONSTER MODE")
     st.caption("One-click 3-6 months of finance content. Generates, renders, uploads, and schedules everything.")
@@ -1398,3 +1442,4 @@ with tab5:
         ramp["auto_mode"]=False
         ramp_state_save(ramp)
         st.success("Monster paused. Manual mode restored.")
+        
