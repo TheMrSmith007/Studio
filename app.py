@@ -182,7 +182,7 @@ def normalize_tts(t):
         except Exception: return m.group(0)
         return (w+" "+scale+" dollars").replace("  "," ").strip()
     t=re.sub(r"\$\s?([\d,]+(?:\.\d+)?)\s*(trillion|billion|million)?",money,t)
-    t=re.sub(r"([\d,]+)\s*(trillion|billion|million)\b",lambda m:(num_to_words(int(m.group(1).replace(',',''))+" "+m.group(2)),t)
+    t=re.sub(r"([\d,]+)\s*(trillion|billion|million)\b",lambda m:num_to_words(int(m.group(1).replace(',',''))+" "+m.group(2)),t)
     t=re.sub(r"(\d+(?:\.\d+)?)\s*%",lambda m:(num_to_words(int(float(m.group(1))))+" percent"),t)
     return t
 def mood_for(i): return MOOD_ROT[i%len(MOOD_ROT)]
