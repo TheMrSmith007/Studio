@@ -935,7 +935,6 @@ Return JSON {{
             JOB["log"].append(f"🤖 Auto-feed queued {n}")
         except Exception: pass
     JOB["running"]=False; JOB["current"]=""; job_save(JOB); vault_save_job(JOB)
-
 def revenue_forecast():
     rev=jload(REV_F,{"kofi_tips":[],"case_files":[]}); line=load_line()
     r=len([i for i in line if i["status"]=="rendered"])
@@ -943,15 +942,12 @@ def revenue_forecast():
     my=r*150 if (r*80>=1000 and r*40>=4000) else 0
     tot=mk+mc+my
     return {"subs":r*80,"hrs":r*40,"yt_ready":(r*80>=1000 and r*40>=4000),"usd":tot,"zar":tot*18.5,"target":tot*18.5>=100000}
-
 def yt_upload(path,title,desc,tags,when=None,thumb=None):
     from googleapiclient.http import MediaFileUpload
     svc=yt_service()
     if not svc: return None
-    
     seo_desc = f"{desc}\n\n🔍 This investigation covers: {', '.join(tags[:5])}. Support independent journalism: {support}"
     seo_tags = tags + ["finance documentary", "money exposé", "wall street secrets", "usa finance", "uk economy"]
-    
     body={
         "snippet":{
             "title": title,
@@ -967,31 +963,25 @@ def yt_upload(path,title,desc,tags,when=None,thumb=None):
     if when: body["status"]["publishAt"]=when
     resp=svc.videos().insert(part="snippet,status",body=body,media_body=MediaFileUpload(path,mimetype="video/mp4",resumable=True)).execute()
     vid=resp["id"]
-    
     ramp=ramp_state_load()
     ramp["uploaded_count"]+=1
     ramp["scheduled_count"]+=1
     ramp_state_save(ramp)
-    
     if thumb:
         try: svc.thumbnails().set(videoId=vid,media_body=MediaFileUpload(thumb,mimetype="image/png")).execute()
         except Exception: pass
     return vid
-
 def smart_ep_when(phase,idx):
     ramp=ramp_state_load()
     base_weeks = idx // (12 if phase=="AGGRESSIVE" else 8 if phase=="SCALE" else 4 if phase=="BUILD" else 2)
-    
     if phase=="AGGRESSIVE":
         days = ["Friday","Wednesday","Monday"]
     elif phase=="SCALE":
         days = ["Friday","Tuesday"]
     else:
         days = ["Friday"]
-    
     day = days[idx % len(days)]
     return occ(day,"21:00",weeks=base_weeks)
-
 def smart_sh_when(phase,k):
     days = ["Monday","Wednesday","Friday"]
     day = days[k % len(days)]
@@ -1025,7 +1015,6 @@ st.markdown("""<style>
  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
  @keyframes glow{0%,100%{box-shadow:0 0 4px #f5c54233}50%{box-shadow:0 0 18px #f5c542aa}}
 </style>""",unsafe_allow_html=True)
-
 line=load_line()
 st.session_state.line=line
 jb=job_load()
@@ -1044,7 +1033,6 @@ pct=sum(flags.values())/len(order)
 st.title("🎬 SHADOW LEDGER — Mission Control")
 st.markdown("".join(f"<span class='chip {states[k]}'>{'✅ ' if states[k]=='done' else '⭐ ' if states[k]=='now' else '🔒 '}{labels[k]}</span>" for k in order),unsafe_allow_html=True)
 st.progress(pct,text=f"Pipeline {int(pct*100)}% complete")
-
 support=st.sidebar.text_input("☕ Support link (Ko-fi)","https://ko-fi.com/shadowledger")
 shop=st.sidebar.text_input("📄 Case File shop link (blank until open)","")
 ep_num=st.sidebar.text_input("Episode #","001")
@@ -1139,7 +1127,6 @@ angle_list=list(ANGLES)
 angle=st.sidebar.selectbox("Story angle",angle_list,index=angle_list.index(adv) if adv in angle_list else 0)
 jsave(SET_F,{"series":series,"pilot":pilot,"auto_mood":auto_mood,"mood":mood,"angle":angle,"voice":voice,"music":music_path,"support":support,"ep_day":ep_day,"ep_time":ep_time,"sh_day":sh_day,"sh_time":sh_time,"manual":manual,"interrupts":interrupts,"footage":FMAP[footage_sel],"voice_mode":("premium" if voice_mode.startswith("PREMIUM") else "free")})
 tab1,tab2,tabS,tab3,tab4=st.tabs(["🥚 1·SCAN","🏭 2·PRODUCE","💼 SPONSOR","📦 3·PUBLISH","📈 STRATEGY"])
-
 def guide(steps):
     html=""; nxt=False
     for name,done in steps:
@@ -1148,7 +1135,6 @@ def guide(steps):
         else: cls=""; lab="•"
         html+=f"<span class='gchip {cls}'>{lab} {name}</span>"
     st.markdown(html,unsafe_allow_html=True)
-
 with tab1:
     with st.expander("🧭 HOW TO USE — 2-minute tour (for anyone)",expanded=not line):
         st.markdown("""1️⃣ **SCAN** → refresh bulletin + Golden Egg scan, tick winners, add to line.
@@ -1240,7 +1226,6 @@ with tab1:
             if st.button("🎬 QUEUE SEQUEL"):
                 tt=next((m.get("topic") for v,m in jload(MET_F,{}).items() if v==hof_best()["vid"]),None)
                 if tt: queue_topic(f"Sequel to: {tt}",80,"HOF")
-
 with tab2:
     st.markdown("## 8️⃣ STEP 6 · Render (cloud background)")
     jb=job_load()
@@ -1335,7 +1320,6 @@ with tab2:
                             else: zf.writestr(n,d)
                     st.session_state[f"pz_{ep}"]=z.getvalue()
                 if st.session_state.get(f"pz_{ep}"): c3.download_button("⬇️ ZIP",st.session_state[f"pz_{ep}"],f"PACK_{ep}.zip",key=f"dz_{ep}")
-
 with tabS:
     st.markdown("## 💼 SPONSOR SUITE")
     spn=st.text_input("Sponsor name","")
@@ -1343,7 +1327,6 @@ with tabS:
     spo=st.checkbox("✅ Approved")
     if st.button("💾 SAVE SLOT"):
         if spn: jsave(SPO_F,{"name":spn,"script":sps,"place":"After cold open + title","approved":spo}); st.success("✅")
-
 with tab3:
     st.caption("Auto-upload sends episode+Shorts to YouTube. This tab builds the ZIP for TikTok/IG/FB + Case File + subtitles + metadata.")
     rendered=[i for i in line if i["status"]=="rendered" and i.get("out") and os.path.exists(i["out"])]
@@ -1365,7 +1348,6 @@ with tab3:
                 st.success("✅ Pack ready.")
             except Exception as e:
                 st.error(f"Pack hiccup: {str(e)[:120]} — try again.")
-
 with tab4:
     st.caption("Your money dashboard: revenue forecast + ramp phase + YPP readiness.")
     rf=revenue_forecast()
@@ -1381,45 +1363,35 @@ with tab4:
     ramp["auto_mode"]=True
     ramp["target_eps"]=30 * months
     ramp_state_save(ramp)
-    
-    try:
+     try:
         st.info(f"🤖 Generating {ramp['target_eps']} episodes ({months} months)...")
         line=load_line()
-        
         while len(line) < ramp["target_eps"]:
             bull=refresh_bulletin(DEFAULT_SEEDS)
             top_topic = bull[0]["t"] if bull else f"Finance scandal #{len(line)+1}"
-            
             series_plan = qwen(f"Prestige documentary topic: {top_topic}. Return JSON {{'episodes':[3]}}")
             for ep_title in series_plan.get("episodes", [top_topic]):
                 if len(line) >= ramp["target_eps"]: break
                 queue_topic(ep_title, 80, "AUTO_MONSTER")
             line=load_line()
-        
         batch_worker(auto_upload=True, auto_schedule=True, auto_feed=True)
-        
-        ramp["auto_mode"]=False
+         ramp["auto_mode"]=False
         ramp_state_save(ramp)
         JOB["log"].append(f"✅ AUTO MONSTER COMPLETE: {ramp['target_eps']} episodes scheduled")
         st.success(f"🎬 {months}-MONTH CONTENT MACHINE COMPLETE!")
-        
-    except Exception as e:
+         except Exception as e:
         JOB["log"].append(f"⚠️ Auto Monster failed: {str(e)[:100]}")
         st.error(f"Monster hiccup: {str(e)[:100]}")
     finally:
         JOB["running"]=False; job_save(JOB); vault_save_job(JOB)
-
 tab1,tab2,tabS,tab3,tab4,tab5=st.tabs(["🥚 1·SCAN","🏭 2·PRODUCE","💼 SPONSOR","📦 3·PUBLISH","📈 STRATEGY","👹 AUTO MONSTER"])
-
 with tab5:
     st.markdown("## 👹 AUTO MONSTER MODE")
     st.caption("One-click 3-6 months of finance content. Generates, renders, uploads, and schedules everything.")
-    
-    months = st.slider("📅 Months of content", 3, 6, 3)
+     months = st.slider("📅 Months of content", 3, 6, 3)
     if st.button("🔥 LAUNCH AUTO MONSTER"):
         threading.Thread(target=auto_monster, args=(months,), daemon=True).start()
         st.success("👹 Monster unleashed! Check '2·PRODUCE' for live progress.")
-    
     jb=job_load()
     ramp=ramp_state_load()
     if ramp["auto_mode"]:
