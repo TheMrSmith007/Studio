@@ -28,6 +28,10 @@ except Exception:
 import moviepy.video.fx as vfx
 
 DASH, YT, PEX = st.secrets["DASHSCOPE_API_KEY"], st.secrets["YOUTUBE_API_KEY"], st.secrets["PEXELS_API_KEY"]
+PIX = st.secrets.get("PEXABAY_API_KEY","")
+GEM = st.secrets.get("GEMINI_API_KEY","")
+GRQ = st.secrets.get("GROQ_API_KEY","")
+GTTS = st.secrets.get("GOOGLE_TTS_API_KEY","")
 YTC_ID = st.secrets.get("YOUTUBE_CLIENT_ID") or st.secrets.get("YOUTUBE_Client_ID") or ""
 YTC_SEC = st.secrets.get("YOUTUBE_CLIENT_SECRET") or st.secrets.get("YOUTUBE_Client_SECRET") or ""
 YT_RT = st.secrets.get("YT_REFRESH_TOKEN","")
@@ -53,7 +57,8 @@ def jload(p,d):
 def jsave(p,d):
     try: json.dump(d,open(p,"w"))
     except Exception: pass
-ENGINE={"v":""}
+ENGINE={"v":""}; VOICE_MODE={"v":"free"}; PAID_OK={"v":False}
+DISCLOSURE="\n\n— Produced with AI-assisted tools. Stock footage via Pexels & Pixabay (free commercial licenses). Original score & sound design by Shadow Ledger."
 def decide(m):
     d=jload(DEC_F,[]); d.append(m); jsave(DEC_F,d)
 def job_load(): return jload(JOB_F,{"running":False,"current":"","log":[],"live":None,"history":[]})
@@ -120,6 +125,7 @@ MOODS={"Calm investigator (default)":"low, calm, intimate documentary voice, slo
 "Hushed suspense":"near-whisper, tense, every word a secret, long silences",
 "Hopeful storyteller":"warm, admiring, quietly triumphant, a smile in the voice"}
 EDGE_VOICES={"Calm investigator (default)":("en-US-GuyNeural","-10%"),"Concerned witness":("en-US-AriaNeural","-5%"),"Grave elegy":("en-GB-RyanNeural","-15%"),"Cold expose":("en-US-ChristopherNeural","-8%"),"Hushed suspense":("en-GB-SoniaNeural","-12%"),"Hopeful storyteller":("en-US-JennyNeural","-5%")}
+GOOGLE_WAVENET={"Calm investigator (default)":"en-US-Wavenet-D","Concerned witness":"en-US-Wavenet-F","Grave elegy":"en-US-Wavenet-D","Cold expose":"en-US-Wavenet-B","Hushed suspense":"en-US-Wavenet-F","Hopeful storyteller":"en-US-Wavenet-A"}
 QWEN_TTS_VOICES=["Cherry","Serena","Ethan","Chelsie"]
 MOOD_ROT=list(MOODS.keys())
 ANGLES={"Dark expose (default)":"Tone: dark investigative expose.","Mystery / curiosity":"Tone: puzzle-box mystery.","David vs Goliath":"Tone: underdog versus a financial giant.","Comeback / positive":"Tone: triumphant human comeback."}
@@ -157,9 +163,39 @@ def normalize_tts(t):
     return t
 def mood_for(i): return MOOD_ROT[i%len(MOOD_ROT)]
 
+# ---------------- FREE LLM CHAIN: Gemini -> Groq -> Qwen ----------------
+def gemini(prompt,sys=None):
+    if not GEM: return None
+    try:
+        full=(sys+"\n\n" if sys else "")+prompt
+        r=requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEM}",json={"contents":[{"parts":[{"text":full}]}],"generationConfig":{"response_mime_type":"application/json"}},timeout=120).json()
+        return json.loads(r["candidates"][0]["content"]["parts"][0]["text"])
+    except Exception: return None
+def groq_llm(prompt,sys=None):
+    if not GRQ: return None
+    try:
+        m=([{"role":"system","content":sys}] if sys else [])+[{"role":"user","content":prompt}]
+        r=requests.post("https://api.groq.com/openai/v1/chat/completions",headers={"Authorization":f"Bearer {GRQ}"},json={"model":"llama-3.1-8b-instant","messages":m,"response_format":{"type":"json_object"}},timeout=120).json()
+        return json.loads(r["choices"][0]["message"]["content"])
+    except Exception: return None
+def qwen(prompt,sys=None):
+    for fn in (gemini,groq_llm):
+        try:
+            r=fn(prompt,sys)
+            if r: return r
+        except Exception: pass
+    m=([{"role":"system","content":sys}] if sys else [])+[{"role":"user","content":prompt}]
+    last=None
+    for model in chain(r"plus",CHAT_MODELS):
+        try:
+            r=requests.post("https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",headers={"Authorization":f"Bearer {DASH}"},json={"model":model,"messages":m,"response_format":{"type":"json_object"}},timeout=120).json()
+            return json.loads(r["choices"][0]["message"]["content"])
+        except Exception as e: last=e
+    raise RuntimeError(f"chat failed: {last}")
+
 YT_ONLY="https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube https://www.googleapis.com/auth/yt-analytics.readonly"
-FULL=YT_ONLY+" https://www.googleapis.com/auth/drive.file"
-def yt_auth_url(scopes=FULL):
+FULLSCOPE=YT_ONLY+" https://www.googleapis.com/auth/drive.file"
+def yt_auth_url(scopes=FULLSCOPE):
     return (f"https://accounts.google.com/o/oauth2/v2/auth?client_id={YTC_ID}&redirect_uri=http://localhost&response_type=code&scope={requests.utils.quote(scopes)}&access_type=offline&prompt=consent")
 def yt_connect(code):
     r=requests.post("https://oauth2.googleapis.com/token",data={"code":code,"client_id":YTC_ID,"client_secret":YTC_SEC,"redirect_uri":"http://localhost","grant_type":"authorization_code"}).json()
@@ -246,8 +282,7 @@ def yt_channel_uploads():
         return vids
     except Exception: return []
 def rebuild_from_youtube():
-    ups=yt_channel_uploads()
-    newl=[]
+    ups=yt_channel_uploads(); newl=[]
     for vid,title in ups:
         newl.append({"topic":title,"score":0,"tag":"RECOVERED","status":"rendered","script":None,"gate":None,"out":None,"srt":None,"err":"","angle":None,"sp":"","yt_id":vid})
     return newl
@@ -309,55 +344,51 @@ Topic: {topic}. Series: {series}. ANGLE: {angle}
 SERIES MEMORY: {bible}
 CEO PREFERENCES (obey these): {prefs}
 STRUCTURE: 1. COLD OPEN + VIEWER STAKES (first 15s). 2. ACT I SUSPECT. 3. ACT II MACHINE (open loop every 90s). 4. ACT III REVEAL. 5. OPEN QUESTION + CTA + BINGE-PITCH.
-RULES: present tense, short cinematic sentences, NO ACCUSATIONS (alleged/documents show), concrete specifics, max 3 sentences/scene.
+RULES: present tense, short cinematic sentences, NO ACCUSATIONS (alleged/documents show), concrete specifics, max 3 sentences/scene. Write natural PAUSES into narration with ellipses for dramatic breath.
 ANTI-SLOP: BANNED: delve, tapestry, landscape, game-changer, uncover the truth.
 OUTPUT JSON: {{"title_options":[3],"hook_words":"MAX 4 WORDS","share_line":"max 10 words","scenes":[{{"narration":"","visual":"","ost":""}}],"pinned_question":"","binge_pitch":"","community_poll":{{"q":"","a":["",""]}},"cold_open_A":"max 20 words","cold_open_B":"max 20 words"}}"""
 GATE="""You are SHADOW LEDGER's executive editor + legal + YouTube policy officer. Review script JSON: {script}
 FIX slop/legal/viewer-stakes/dragging/clickbait/AdSense. Return JSON {{"slop_clean":0-100,"emotion":0-100,"viewer_stakes":"","legal_flags_fixed":N,"yt_policy":"clean|fixed","clickbait":"clean|fixed","advisory":"","pacing":"","scenes":[same schema],"title_options":[],"share_line":"","cold_open_A":"","cold_open_B":""}}"""
-def qwen(prompt,sys=None):
-    m=([{"role":"system","content":sys}] if sys else [])+[{"role":"user","content":prompt}]
-    last=None
-    for model in chain(r"plus",CHAT_MODELS):
-        try:
-            r=requests.post("https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",headers={"Authorization":f"Bearer {DASH}"},json={"model":model,"messages":m,"response_format":{"type":"json_object"}},timeout=120).json()
-            return json.loads(r["choices"][0]["message"]["content"])
-        except Exception as e: last=e
-    raise RuntimeError(f"chat failed: {last}")
 def wan_video_prompt(v): return (f"{v}. cinematic documentary film still, anamorphic 2.39:1, 35mm grain, low-key chiaroscuro, "
     "crushed blacks, gold practicals, teal shadows, slow dolly, photorealistic live-action look, award-winning cinematography, "
     "sharp focus, highly detailed, no morphing, no distortion, ABSOLUTELY no text, no letters, no words, no signage, no captions, no watermark, no logos")
 
+# ---------------- VOICE: Google WaveNet (free premium) -> CosyVoice -> Edge ----------------
+def google_tts(text,mood):
+    if not GTTS: return None
+    try:
+        body={"input":{"text":text},"voice":{"languageCode":"en-US","name":GOOGLE_WAVENET.get(mood,"en-US-Wavenet-D")},"audioConfig":{"audioEncoding":"MP3","speakingRate":0.95,"pitch":-2}}
+        r=requests.post(f"https://texttospeech.googleapis.com/v1/text:synthesize?key={GTTS}",json=body,timeout=60).json()
+        if "audioContent" in r:
+            ENGINE["v"]="Google WaveNet — premium free"; return base64.b64decode(r["audioContent"])
+    except Exception: pass
+    return None
 def speak(text,voice,mood):
     text=normalize_tts(text)
-    try:
-        import dashscope
-        from dashscope.audio.tts_v2 import SpeechSynthesizer
-        dashscope.base_http_api_url="https://dashscope-intl.aliyuncs.com/api/v1"
-        dashscope.base_websocket_api_url="wss://dashscope-intl.aliyuncs.com/api-ws/v1/inference"
-        cm=sorted(disc(r"cosyvoice",6) or ["cosyvoice-v3-plus","cosyvoice-v3-flash","cosyvoice-v2"],key=lambda m:(0 if ("plus" in m or "instruct" in m) else 1))
-        for model in cm:
-            for instr in (MOODS[mood],None):
-                try:
-                    kw={"model":model,"voice":voice or "longanyang"}
-                    if instr: kw["instruction"]=instr
-                    b=SpeechSynthesizer(**kw).call(text)
-                    if b: ENGINE["v"]=f"CosyVoice ({model}) — premium"; return b
-                except Exception: continue
-    except Exception: pass
-    tm=sorted(disc(r"tts",6) or ["qwen3-tts-plus","qwen-audio-3.0-tts-flash"],key=lambda m:(0 if ("plus" in m or "instruct" in m) else 1))
-    for model in tm:
-        for vq in QWEN_TTS_VOICES:
-            try:
-                r=requests.post("https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",headers={"Authorization":f"Bearer {DASH}"},json={"model":model,"messages":[{"role":"user","content":text}],"modalities":["audio"],"audio":{"voice":vq,"format":"mp3"}},timeout=90).json()
-                b=base64.b64decode(r["choices"][0]["message"]["audio"]["data"])
-                if b: ENGINE["v"]=f"Qwen-TTS ({model}/{vq}) — premium"; return b
-            except Exception: continue
+    g=google_tts(text,mood)
+    if g: return g
+    if VOICE_MODE["v"]=="premium":
+        try:
+            import dashscope
+            from dashscope.audio.tts_v2 import SpeechSynthesizer
+            dashscope.base_http_api_url="https://dashscope-intl.aliyuncs.com/api/v1"
+            dashscope.base_websocket_api_url="wss://dashscope-intl.aliyuncs.com/api-ws/v1/inference"
+            cm=sorted(disc(r"cosyvoice",6) or ["cosyvoice-v3-plus","cosyvoice-v3-flash"],key=lambda m:(0 if ("plus" in m or "instruct" in m) else 1))
+            for model in cm:
+                for instr in (MOODS[mood],None):
+                    try:
+                        kw={"model":model,"voice":voice or "longanyang"}
+                        if instr: kw["instruction"]=instr
+                        b=SpeechSynthesizer(**kw).call(text)
+                        if b: ENGINE["v"]=f"CosyVoice ({model}) — premium"; return b
+                    except Exception: continue
+        except Exception: pass
     try:
         import edge_tts,asyncio
         v,rr=EDGE_VOICES.get(mood,("en-US-GuyNeural","-10%"))
         p=f"{TMP}/edge_{hashlib.md5((text+mood).encode()).hexdigest()}.mp3"
         asyncio.run(edge_tts.Communicate(text,v,rate=rr).save(p))
-        ENGINE["v"]="Edge Neural (free, studio-grade)"; return open(p,"rb").read()
+        ENGINE["v"]="Edge Neural (free)"; return open(p,"rb").read()
     except Exception: pass
     from gtts import gTTS
     p=f"{TMP}/gtts_{hashlib.md5((text+mood).encode()).hexdigest()}.mp3"
@@ -394,11 +425,38 @@ def wan_images(prompt,n=2):
         except Exception: continue
     raise RuntimeError("image models failed")
 def pexels_clip(q): return requests.get("https://api.pexels.com/videos/search",headers={"Authorization":PEX},params={"query":q,"per_page":5}).json()["videos"][0]["video_files"][0]["link"]
+def pixabay_clip(q):
+    if not PIX: return None
+    try:
+        r=requests.get("https://pixabay.com/api/videos/",params={"key":PIX,"q":q,"per_page":5}).json()
+        v=r["hits"][0]["videos"]
+        k="medium" if "medium" in v else "small" if "small" in v else list(v)[0]
+        return v[k]["url"]
+    except Exception: return None
 def fetch(u,n):
     p=f"{TMP}/{n}"; open(p,"wb").write(requests.get(u).content); return p
 def estimate(sc,pilot):
     sc_=sc["scenes"][:4] if pilot else sc["scenes"]; chars=sum(len(s["narration"]) for s in sc_)
     return int(chars/14)+8+len(sc_), len(sc_)*0.06+chars*0.00003
+def _scene_clip(visual,footage,idx):
+    q=" ".join([w for w in visual.split() if len(w)>3][:8]) or "cinematic documentary b-roll"
+    vu=None
+    for src in (pexels_clip,pixabay_clip):
+        try:
+            vu=src(q)
+            if vu: break
+        except Exception: vu=None
+    if footage=="ai" and PAID_OK["v"] and not vu:
+        for _ in range(2):
+            try: vu=wan_video(wan_video_prompt(visual)); break
+            except Exception: vu=None
+    if footage=="auto" and idx%2==1 and PAID_OK["v"] and not vu:
+        try: vu=wan_video(wan_video_prompt(visual))
+        except Exception: vu=None
+    if not vu:
+        try: vu=pexels_clip("cinematic documentary b-roll")
+        except Exception: vu=pixabay_clip("cinematic documentary b-roll")
+    return vu
 def balance_advice(line):
     met=jload(MET_F,{}); ctrs={}
     for vid,m in met.items():
@@ -480,7 +538,7 @@ def yt_upload(path,title,desc,tags,when=None,thumb=None):
     from googleapiclient.http import MediaFileUpload
     svc=yt_service()
     if not svc: return None
-    body={"snippet":{"title":title,"description":desc,"tags":tags,"categoryId":"25"},"status":{"privacyStatus":"private","selfDeclaredMadeForKids":False}}
+    body={"snippet":{"title":title,"description":desc+DISCLOSURE,"tags":tags,"categoryId":"25"},"status":{"privacyStatus":"private","selfDeclaredMadeForKids":False}}
     if when: body["status"]["publishAt"]=when
     resp=svc.videos().insert(part="snippet,status",body=body,media_body=MediaFileUpload(path,mimetype="video/mp4",resumable=True)).execute()
     vid=resp["id"]
@@ -527,7 +585,7 @@ def ceo_pilot(msg):
             S=jload(SET_F,{}); S["angle"]=a.get("value"); jsave(SET_F,S); outs.append("🎨 Angle set.")
     return r.get("reply","Done, CEO."),outs
 
-# ---------------- PIL + SOUND + RENDER ----------------
+# ---------------- PIL + CINEMATIC SOUND + RENDER (signature style) ----------------
 def card_img(title,sub="",w=1280,h=720,transparent=False):
     img=Image.new("RGBA" if transparent else "RGB",(w,h),(0,0,0,0) if transparent else BLACK)
     d=ImageDraw.Draw(img)
@@ -614,19 +672,27 @@ def sound_bed(dur,markers,hopeful=False):
     pad=0.0
     for off in (0,3,5,7):
         f=root*(2**(off/12.0))
-        pad+=0.06*np.sin(2*np.pi*f*t)*(0.7+0.3*np.sin(2*np.pi*0.07*t+off))
-    bass=0.16*np.sin(2*np.pi*(root/2)*t)*(0.5+0.5*(np.sin(2*np.pi*2.0*t)>0))
+        pad+=0.05*np.sin(2*np.pi*f*t)*(0.7+0.3*np.sin(2*np.pi*0.07*t+off))
+    swell=np.zeros(n)
+    swell[:int(3*SR)]+=np.linspace(0,1,int(3*SR))
+    swell[int(max(0,dur-4)*SR):]+=np.linspace(1,0,n-int(max(0,dur-4)*SR))
+    pad*=(0.6+0.8*swell)
+    bass=0.14*np.sin(2*np.pi*(root/2)*t)*(0.5+0.5*(np.sin(2*np.pi*2.0*t)>0))
     rng=np.random.default_rng(7); hats=np.zeros(n)
     step=int(0.5*SR); tk=int(0.02*SR); tt=np.arange(tk)/SR
-    hat=0.06*rng.standard_normal(tk)*np.exp(-120*tt)
+    hat=0.05*rng.standard_normal(tk)*np.exp(-120*tt)
     for s in range(0,n-tk,step): hats[s:s+tk]+=hat
     bed=pad+bass+hats
     for m in markers:
+        rs=int(max(0,m-1.5)*SR); re_=int(m*SR)
+        seg=np.arange(max(1,re_-rs))/SR
+        bed[rs:re_]+=0.25*np.sin(2*np.pi*(200+800*seg/1.5)*seg)*np.linspace(0,1,re_-rs)
         s,e=int(m*SR),min(n,int((m+1.8)*SR)); tt=np.arange(e-s)/SR
         bed[s:e]+=0.5*np.sin(2*np.pi*40*tt)*np.exp(-2.5*tt)
-    for dt in np.arange(45.0,dur,45.0):
-        s,e=int(dt*SR),min(n,int((dt+1.2)*SR)); tt=np.arange(e-s)/SR
-        bed[s:e]+=0.5*np.sin(2*np.pi*32*tt)*np.exp(-2*tt)
+        w=int(0.4*SR); s=int(m*SR); e=min(n,s+w)
+        bed[s:e]+=0.2*rng.standard_normal(e-s)*np.exp(-np.linspace(0,6,e-s))
+        s=int(max(0,m-0.4)*SR); e=int(m*SR)
+        bed[s:e]*=0.15
     bed=bed/np.max(np.abs(bed))*0.8
     return AudioArrayClip(np.stack([bed,bed],axis=1),fps=SR)
 def write_script(topic,series,angle,bible="",prefs=""):
@@ -648,41 +714,12 @@ def script_with_floor(topic,series,angle):
                 sc=write_script(topic,series,angle); g=quality_gate(topic,sc); sc=apply_gate(sc,g)
         except Exception: break
     return sc,g
-def _scene_clip(visual,footage,idx):
-    q=" ".join([w for w in visual.split() if len(w)>3][:8]) or "cinematic documentary b-roll"
-    vu=None
-    if footage=="real":
-        try: vu=pexels_clip(q)
-        except Exception: vu=None
-        if not vu:
-            for _ in range(2):
-                try: vu=wan_video(wan_video_prompt(visual)); break
-                except Exception: vu=None
-    elif footage=="auto":
-        if idx%2==0:
-            try: vu=pexels_clip(q)
-            except Exception: vu=None
-        if not vu:
-            for _ in range(2):
-                try: vu=wan_video(wan_video_prompt(visual)); break
-                except Exception: vu=None
-        if not vu:
-            try: vu=pexels_clip("cinematic documentary b-roll")
-            except Exception: vu=None
-    else:
-        for _ in range(2):
-            try: vu=wan_video(wan_video_prompt(visual)); break
-            except Exception: vu=None
-        if not vu:
-            try: vu=pexels_clip(q)
-            except Exception: vu=pexels_clip("cinematic documentary b-roll")
-    return vu
 def render_cold_open_preview(sc,voice,mood,ep):
     paths=[]
     for tag,txt in (("A",sc.get("cold_open_A","")),("B",sc.get("cold_open_B",""))):
         if not txt: continue
         ap=f"{TMP}/coldopen_{tag}_{ep}.mp3"; open(ap,"wb").write(speak(txt,voice,mood)); ac=AudioFileClip(ap)
-        vu=_scene_clip("intense single subject, gold rim light, matte black","ai",0)
+        vu=_scene_clip("intense single subject, gold rim light, matte black","real",0)
         vc=VideoFileClip(fetch(vu,f"cold_{tag}_{ep}.mp4")).without_audio().resized((1280,720)).with_fps(24)
         while vc.duration<ac.duration: vc=concatenate_videoclips([vc,vc.copy()])
         vc=vc.with_duration(ac.duration).with_audio(ac)
@@ -695,7 +732,7 @@ def sponsor_blocks(sp,voice,mood):
     b.append((ImageClip(card_img(sp["name"],"a word from our sponsor")).with_duration(ac.duration),ac,sp.get("script","")))
     b.append((ImageClip(card_img("NOW, BACK TO","the investigation")).with_duration(2.5),silence(2.5),None))
     return b
-def render(sc,topic,series,pilot,music,voice,mood,sp=None,angle="Dark expose (default)",supporters=None,live=None,interrupts=True,footage="ai"):
+def render(sc,topic,series,pilot,music,voice,mood,sp=None,angle="Dark expose (default)",supporters=None,live=None,interrupts=True,footage="real"):
     scenes=sc["scenes"][:4] if pilot else sc["scenes"]; parts=[]; n=len(scenes); hopeful=angle in ("Comeback / positive","David vs Goliath")
     def L(stage,pct):
         if live: live(stage,pct)
@@ -706,6 +743,10 @@ def render(sc,topic,series,pilot,music,voice,mood,sp=None,angle="Dark expose (de
         vc=VideoFileClip(fetch(vu,f"c{i}.mp4")).without_audio().resized((1280,720)).with_fps(24)
         while vc.duration<ac.duration: vc=concatenate_videoclips([vc,vc.copy()])
         vc=vc.with_duration(ac.duration)
+        if i==n-1:
+            try: vc=vc.with_effects([vfx.MultiplySpeed(0.75)])
+            except Exception: pass
+            parts.append((ImageClip(np.zeros((720,1280,3),dtype=np.uint8)).with_duration(0.5),silence(0.5),None))
         if s.get("ost"): vc=CompositeVideoClip([vc,ImageClip(ost_img(s["ost"])).with_duration(min(3,ac.duration)).with_start(ac.duration*0.35).with_position((0,560))])
         parts.append((vc,ac,s["narration"]))
     L("🎞️ Cutting cold open → title → acts",0.75)
@@ -730,7 +771,7 @@ def render(sc,topic,series,pilot,music,voice,mood,sp=None,angle="Dark expose (de
         mc=AudioFileClip(music); nn2=int(vid.duration//mc.duration)+1
         layers_a.append(concatenate_videoclips([mc]*nn2).with_duration(vid.duration).with_volume_scaled(0.12))
     markers.append(vid.duration*0.68)
-    layers_a.append(sound_bed(vid.duration,markers,hopeful=hopeful).with_volume_scaled(0.4))
+    layers_a.append(sound_bed(vid.duration,markers,hopeful=hopeful).with_volume_scaled(0.3))
     final=vid.with_audio(CompositeAudioClip(layers_a).with_duration(vid.duration))
     layers=[final]
     if os.path.exists(f"{TMP}/bug.png"): layers.append(ImageClip(f"{TMP}/bug.png").resized(height=64).with_position((28,28)).with_duration(final.duration))
@@ -813,7 +854,7 @@ def thumbs(topic,hook):
             p=f"{TMP}/thumb_{j}.png"; img.save(p); ps.append(p)
     return ps
 CHECKLIST="YOUTUBE CHECKLIST — SHADOW LEDGER\n[ ] NOT made for kids\n[ ] Paid promotion: {sp}\n[ ] AdSense-scrubbed metadata\n[ ] Subtitles.srt\n[ ] End screen + cards\n[ ] Pin pinned_comment\n[ ] THUMB A/B\n[ ] Shorts on smart/manual days\n[ ] TikTok/Reels same day\n[ ] Schedule per smart/manual plan\n"
-RIGHTS="RIGHTS RECORD — original AI-generated footage (Wan, one-of-a-kind per render); Pexels live-action stock where selected; licensed neural TTS; original procedural score; Case Files original compilation.\n"
+RIGHTS="RIGHTS RECORD — real stock footage via Pexels & Pixabay (free commercial licenses); licensed/Google neural TTS; original procedural score & sound design; Case Files original compilation.\n"
 SHOP_BLURB="📄 THE CASE FILE — {topic}\nFull dossier: timeline, players, money, glossary, discussion. $5 pay-what-you-want.\n"
 def pack_entries(it,ep,support,shop,series,do_shorts3=True,do_dubs=False):
     entries=[]; sc=it["script"]; sl=slug(it["topic"]); extra={"shorts":[],"tiktok":None}
@@ -854,7 +895,10 @@ def batch_worker(topics=None,auto_upload=False,auto_schedule=True,auto_feed=Fals
     phase=ramp_advisor()["phase"]
     manual=S.get("manual",False)
     interrupts=S.get("interrupts",True)
-    footage=S.get("footage","ai")
+    footage=S.get("footage","real")
+    VOICE_MODE["v"]=S.get("voice_mode","free")
+    PAID_OK["v"]=bool(S.get("unlock_paid",False))
+    cap=S.get("max_spend",200); spent_batch=0.0
     ep_day=S.get("ep_day","Friday"); ep_time=S.get("ep_time","21:00")
     sh_day=S.get("sh_day","Monday"); sh_time=S.get("sh_time","17:00")
     line=load_line()
@@ -877,6 +921,10 @@ def batch_worker(topics=None,auto_upload=False,auto_schedule=True,auto_feed=Fals
             it["out"],it["srt"],it["status"],it["err"]=out,srt,"rendered",""
             el=int(time.time()-t0); secs,cost=estimate(it["script"],S.get("pilot",False))
             costs=jload(COST_F,[]); costs.append({"ep":idx+1,"est":round(cost,3)}); jsave(COST_F,costs)
+            spent_batch+=cost
+            if spent_batch>cap and PAID_OK["v"]:
+                PAID_OK["v"]=False; footage="real"
+                JOB["log"].append("💰 Spend-guard: cap reached — remaining switched to FREE footage.")
             JOB["log"].append(f"✅ EP {idx+1} rendered {el//60}m{el%60:02d}s")
             save_line(line); vault_save(line)
             if auto_upload and not it.get("yt_id") and (os.path.exists(YT_TOK_F) or YT_RT):
@@ -924,7 +972,7 @@ def revenue_forecast():
     tot=mk+mc+my
     return {"subs":r*80,"hrs":r*40,"yt_ready":(r*80>=1000 and r*40>=4000),"usd":tot,"zar":tot*18.5,"target":tot*18.5>=100000}
 
-# ---------------- UI (v52 — permanent memory, no locks) ----------------
+# ---------------- UI (v53) ----------------
 st.set_page_config(page_title="Shadow Ledger Studio",page_icon="🎬",layout="wide")
 st.markdown("""<style>
  .stApp{background:radial-gradient(1200px 600px at 80% -10%,#14304f66,transparent),linear-gradient(180deg,#070d18,#0b1526 60%,#081020);}
@@ -980,8 +1028,11 @@ ep_num=st.sidebar.text_input("Episode #","001")
 voice=st.sidebar.text_input("🎙️ Narrator voice ID","longanyang")
 auto_mood=st.sidebar.checkbox("🎭 Auto-rotate mood (recommended)",True)
 mood=st.sidebar.selectbox("🎭 Manual mood (if auto OFF)",list(MOODS))
-footage_sel=st.sidebar.selectbox("🎥 Footage source",["AI-unique (Wan) — signature look","Auto (AI + real B-roll mix)","Real stock (Pexels)"],index=0)
-FMAP={"AI-unique (Wan) — signature look":"ai","Auto (AI + real B-roll mix)":"auto","Real stock (Pexels)":"real"}
+footage_sel=st.sidebar.selectbox("🎥 Footage (FREE first)",["Real stock (Pexels+Pixabay) — FREE & clean","Auto (real + AI mix)","AI-unique (Wan) — paid, unlock below"],index=0)
+FMAP={"Real stock (Pexels+Pixabay) — FREE & clean":"real","Auto (real + AI mix)":"auto","AI-unique (Wan) — paid, unlock below":"ai"}
+voice_mode=st.sidebar.selectbox("🎙️ Voice",["FREE (Google WaveNet/Edge) — R0","PREMIUM (CosyVoice) — ~R5/ep"],index=0)
+max_spend=st.sidebar.number_input("💰 MAX SPEND PER BATCH (ZAR) — spend-guard",0,10000,200,50)
+unlock_paid=st.sidebar.checkbox("🔓 Allow paid AI video up to the cap",False)
 auto_upload=st.sidebar.checkbox("☁️ Auto-upload after render",True)
 auto_schedule=st.sidebar.checkbox("🤖 Smart auto-schedule",True)
 interrupts=st.sidebar.checkbox("⚡ Pattern interrupts (subtle)",True)
@@ -1019,7 +1070,7 @@ with st.sidebar.expander("🧑✈️ CEO's Pilot"):
 with st.sidebar.expander("🔑 Connect + Vault (on-demand)"):
     if YTC_ID and YTC_SEC: st.success("Secrets detected ✅")
     else: st.warning("Secrets must be YOUTUBE_CLIENT_ID + YOUTUBE_CLIENT_SECRET (all caps).")
-    if st.button("1️⃣ Connect (YouTube + Vault)"): st.code(yt_auth_url(FULL))
+    if st.button("1️⃣ Connect (YouTube + Vault)"): st.code(yt_auth_url(FULLSCOPE))
     if st.button("1️⃣ Connect (YouTube only)"): st.code(yt_auth_url(YT_ONLY))
     code=st.text_input("2️⃣ Paste the code")
     if code and st.button("🔗 Connect"):
@@ -1054,7 +1105,7 @@ with st.sidebar.expander("🔑 Connect + Vault (on-demand)"):
 adv=balance_advice(line)
 angle_list=list(ANGLES)
 angle=st.sidebar.selectbox("Story angle",angle_list,index=angle_list.index(adv) if adv in angle_list else 0)
-jsave(SET_F,{"series":series,"pilot":pilot,"auto_mood":auto_mood,"mood":mood,"angle":angle,"voice":voice,"music":music_path,"support":support,"ep_day":ep_day,"ep_time":ep_time,"sh_day":sh_day,"sh_time":sh_time,"manual":manual,"interrupts":interrupts,"footage":FMAP[footage_sel]})
+jsave(SET_F,{"series":series,"pilot":pilot,"auto_mood":auto_mood,"mood":mood,"angle":angle,"voice":voice,"music":music_path,"support":support,"ep_day":ep_day,"ep_time":ep_time,"sh_day":sh_day,"sh_time":sh_time,"manual":manual,"interrupts":interrupts,"footage":FMAP[footage_sel],"voice_mode":("premium" if voice_mode.startswith("PREMIUM") else "free"),"max_spend":max_spend,"unlock_paid":unlock_paid})
 tab1,tab2,tabS,tab3,tab4=st.tabs(["🥚 1·SCAN","🏭 2·PRODUCE","💼 SPONSOR","📦 3·PUBLISH","📈 STRATEGY"])
 
 def guide(steps):
@@ -1069,10 +1120,10 @@ def guide(steps):
 with tab1:
     with st.expander("🧭 HOW TO USE — 2-minute tour (for anyone)",expanded=not line):
         st.markdown("""1️⃣ **SCAN** → refresh bulletin + Golden Egg scan, tick winners, add to line.
-2️⃣ **PRODUCE** → series plan, script+gate, approve, RENDER (runs on cloud, auto-uploads).
-3️⃣ **PUBLISH** → build the ZIP (Shorts/TikTok/Case File) + watch links.
-🔁 **Memory:** everything auto-saves to the Vault; on reopen it restores, or rebuilds from your YouTube uploads.
-🆘 **Lost?** Use sidebar → 'Recover / rebuild from YouTube' or 'Restore line from Vault'.""")
+2️⃣ **PRODUCE** → series plan, script+gate, approve, RENDER (cloud, auto-uploads).
+3️⃣ **PUBLISH** → build ZIP (Shorts/TikTok/Case File) + watch links.
+🔁 **Memory:** auto-saves to Vault; on reopen restores or rebuilds from YouTube.
+🆘 **Lost?** sidebar → 'Recover / rebuild from YouTube' or 'Restore line from Vault'.""")
     bull_items=jload(BULL_F,{}).get("items",[])
     guide([("1 BULLETIN",bool(bull_items)),("2 SCAN",bool(st.session_state.get("scan"))),("3 ADD",bool(line)),("4+ PRODUCE ➔",bool(line))])
     st.markdown("<div class='section'>🗺️ START HERE — follow the glowing step</div>",unsafe_allow_html=True)
@@ -1288,7 +1339,7 @@ with tab4:
     rf=revenue_forecast()
     st.markdown(f"**Projected:** ${rf['usd']:.0f}/mo ≈ R{rf['zar']:.0f} · Subs ~{rf['subs']} · {'✅ YPP-ready' if rf['yt_ready'] else '⏳ building'}")
     if rf["target"]: st.success("🏆 R100k/month TARGET REACHED")
-    st.markdown("""**v52 — PERMANENT MEMORY, NO LOCKS, SELF-EXPLAINING.** Google Drive is now the database (every change saved, restored on
-    open); YouTube is the archive (rebuild line from your uploads if everything else is empty); no locked steps; a built-in
-    2-minute tour; crash-detection + RESUME; per-episode Vault saves. Plus all v50/v51 quality & controls. **Open it cold,
-    and it remembers you.** This is the SaaS-grade foundation you asked for, CEO. 🎬""")
+    st.markdown("""**v53 — FREE-TOOLS, MASTERFUL ART.** Google WaveNet voice (free premium) + Gemini/Groq free scripts + Pexels/Pixabay
+    real footage + original cinematic sound design (risers/booms/whooshes/drops/swells) + signature edit (letterbox, slow-mo
+    reveal, black tension beats, pauses, color grade). Spend-guard caps cost. Permanent memory + recover. This is the
+    channel that makes free tools look like a million dollars. 🎬""")
