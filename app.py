@@ -91,7 +91,6 @@ def smart_ep_when(phase,idx):
 def smart_sh_when(phase,k):
     return occ(["Monday","Wednesday","Friday"][k%3],"17:00",weeks=k//3)
 
-# ---------------- MODEL DISCOVERY ----------------
 _MC={"t":0.0,"ids":[]}
 def list_models():
     if time.time()-_MC["t"]>21600:
@@ -126,7 +125,6 @@ MOOD_ROT=list(MOODS.keys())
 ANGLES={"Dark expose (default)":"Tone: dark investigative expose.","Mystery / curiosity":"Tone: puzzle-box mystery.","David vs Goliath":"Tone: underdog versus a financial giant.","Comeback / positive":"Tone: triumphant human comeback."}
 TONE_LABEL={"Dark expose (default)":"A DARK EXPOSE","Mystery / curiosity":"A MYSTERY","David vs Goliath":"AN UNDERDOG STORY","Comeback / positive":"A COMEBACK"}
 
-# ---------------- TTS NORMALIZER ----------------
 _ONES=["","one","two","three","four","five","six","seven","eight","nine","ten","eleven","twelve","thirteen","fourteen","fifteen","sixteen","seventeen","eighteen","nineteen"]
 _TENS=["","","twenty","thirty","forty","fifty","sixty","seventy","eighty","ninety"]
 def _w3(n):
@@ -159,7 +157,6 @@ def normalize_tts(t):
     return t
 def mood_for(i): return MOOD_ROT[i%len(MOOD_ROT)]
 
-# ---------------- OAUTH + YOUTUBE + DRIVE (on-demand) ----------------
 YT_ONLY="https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube https://www.googleapis.com/auth/yt-analytics.readonly"
 FULL=YT_ONLY+" https://www.googleapis.com/auth/drive.file"
 def yt_auth_url(scopes=FULL):
@@ -246,7 +243,6 @@ def yt_channel_uploads():
         return vids
     except Exception: return []
 
-# ---------------- LINE (local-only at boot) ----------------
 def load_line(): return jload(LINE_F,[])
 def save_line(l):
     jsave(LINE_F,l)
@@ -259,6 +255,11 @@ for _it in st.session_state.line:
     if _it["status"]=="rendered" and not os.path.exists(_it.get("out") or ""):
         _it["status"]="approved"; _it["err"]="media cache cleared — script kept, press render to redo"
 jsave(LINE_F, st.session_state.line)
+def _match(topic,title):
+    t=topic.lower(); ti=title.lower()
+    if t[:25] in ti: return True
+    words=[w for w in re.findall(r"[a-z0-9]+",t) if len(w)>4]
+    return any(w in ti for w in words)
 def queue_topic(t,sc,tag):
     line=load_line()
     if t and not any(i["topic"]==t for i in line):
@@ -269,7 +270,6 @@ def queue_topic(t,sc,tag):
         return True
     return False
 
-# ---------------- BIBLE/HOF/DNA/GATE ----------------
 def bible_txt():
     b=jload(BIBLE_F,[])
     if not b: return "No previous episodes yet."
@@ -302,9 +302,10 @@ def qwen(prompt,sys=None):
             return json.loads(r["choices"][0]["message"]["content"])
         except Exception as e: last=e
     raise RuntimeError(f"chat failed: {last}")
-def wan_video_prompt(v): return f"{v}. cinematic documentary film still, anamorphic 2.39:1, 35mm grain, low-key chiaroscuro, crushed blacks, gold practicals, teal shadows, slow dolly, no text, no watermark"
+def wan_video_prompt(v): return (f"{v}. cinematic documentary film still, anamorphic 2.39:1, 35mm grain, low-key chiaroscuro, "
+    "crushed blacks, gold practicals, teal shadows, slow dolly, photorealistic live-action look, award-winning cinematography, "
+    "sharp focus, highly detailed, no morphing, no distortion, ABSOLUTELY no text, no letters, no words, no signage, no captions, no watermark, no logos")
 
-# ---------------- VOICE CHAIN ----------------
 def speak(text,voice,mood):
     text=normalize_tts(text)
     try:
@@ -449,7 +450,7 @@ def refresh_bulletin(seed_text):
         k=i["t"].lower().strip()
         if k and k not in seen: seen.add(k); out.append(i)
     out.sort(key=lambda x:-x["sc"]); jsave(BULL_F,{"ts":datetime.now().isoformat(),"items":out[:12]}); return out[:12]
-def series_plan(t): return qwen(f"Prestige documentary topic: {t}. Return JSON {{'series':bool,'why':'','episodes':[]}}")
+def series_plan(t): return qwen(f"Prestige documentary topic: {t}. Return JSON {{'series':bool,'why':'','episodes':[2-3 distinct titles]}}")
 TRIGGERS={"scam":"alleged fraud","scammer":"alleged fraudster","kill":"fatality","murder":"fatality","suicide":"tragic death","terrorist":"extremist","cartel":"syndicate","rape":"assault","steal":"misappropriate"}
 def adsense_scrub(t):
     for b,g in TRIGGERS.items(): t=re.sub(rf"\b{b}\b",g,t,flags=re.IGNORECASE)
@@ -505,7 +506,7 @@ def ceo_pilot(msg):
             S=jload(SET_F,{}); S["angle"]=a.get("value"); jsave(SET_F,S); outs.append("🎨 Angle set.")
     return r.get("reply","Done, CEO."),outs
 
-# ---------------- PIL + SOUND + RENDER ----------------
+# ---------------- PIL + SOUND + RENDER (v50) ----------------
 def card_img(title,sub="",w=1280,h=720,transparent=False):
     img=Image.new("RGBA" if transparent else "RGB",(w,h),(0,0,0,0) if transparent else BLACK)
     d=ImageDraw.Draw(img)
@@ -513,6 +514,14 @@ def card_img(title,sub="",w=1280,h=720,transparent=False):
     d.text((w//2,h//2-30),title,font=F(64),fill=GOLD,anchor="mm")
     if sub: d.text((w//2,h//2+50),sub,font=F(30),fill=(220,220,220),anchor="mm")
     d.rectangle([w//2-260,h//2+95,w//2+260,h//2+98],fill=GOLD)
+    return np.array(img)
+def vcard_img(title,sub=""):
+    img=Image.new("RGB",(1080,1920),BLACK); d=ImageDraw.Draw(img)
+    d.rectangle([60,820,1020,1100],fill=(8,9,12))
+    for k,ln in enumerate(textwrap.wrap(title,18)[:4]): d.text((540,880+k*70),ln.upper(),font=F(56),fill=GOLD,anchor="mm")
+    if sub:
+        for k,ln in enumerate(textwrap.wrap(sub,24)[:3]): d.text((540,1140+k*50),ln,font=F(34),fill=(220,220,220),anchor="mm")
+    d.rectangle([420,1180,660,1186],fill=GOLD)
     return np.array(img)
 def credits_img(names):
     img=Image.new("RGB",(1280,720),BLACK); d=ImageDraw.Draw(img)
@@ -524,9 +533,15 @@ def ost_img(text):
     img=Image.new("RGBA",(1280,160),(0,0,0,0)); d=ImageDraw.Draw(img)
     d.text((640,80),text.upper(),font=F(72),fill=GOLD,anchor="mm",stroke_width=5,stroke_fill=(0,0,0))
     return np.array(img)
-def pattern_interrupt(dur=0.8):
+def vost_img(text):
+    img=Image.new("RGBA",(1080,160),(0,0,0,0)); d=ImageDraw.Draw(img)
+    d.text((540,80),text.upper(),font=F(56),fill=GOLD,anchor="mm",stroke_width=5,stroke_fill=(0,0,0))
+    return np.array(img)
+def pattern_interrupt(dur=0.6):
     img=Image.new("RGBA",(1280,720),(0,0,0,0)); d=ImageDraw.Draw(img)
-    d.rectangle([0,0,1280,720],fill=(0,0,0,180)); d.text((640,360),"FOLLOW THE MONEY",font=F(110),fill=GOLD,anchor="mm")
+    d.rectangle([0,640,1280,720],fill=(0,0,0,150))
+    d.rectangle([40,676,560,684],fill=GOLD)
+    d.text((60,660),"FOLLOW THE MONEY",font=F(28),fill=GOLD,anchor="lm")
     return ImageClip(np.array(img)).with_duration(dur)
 def tiktok_intro(hook):
     img=Image.new("RGB",(1080,1920),BLACK); d=ImageDraw.Draw(img)
@@ -551,7 +566,7 @@ def case_file_pdf(topic,series,dos,support,path,ep="001"):
                 d.text((90,y),("• " if k==0 else "   ")+ln,font=F(30),fill=(220,220,220)); y+=46
                 if y>H-160: pages.append(img); img,d=blank(); y=310
         pages.append(img)
-    section("TIMELINE",dos.get("timeline",[])); section("KEY_PLAYERS",dos.get("key_players",[])); section("FOLLOW THE MONEY",dos.get("follow_the_money",[]))
+    section("TIMELINE",dos.get("timeline",[])); section("KEY PLAYERS",dos.get("key_players",[])); section("FOLLOW THE MONEY",dos.get("follow_the_money",[]))
     section("GLOSSARY",dos.get("glossary",[])); section("DISCUSSION",dos.get("discussion",[]))
     img,d=blank(); d.text((W//2,800),"STAND WITH THE LEDGER",font=F(60),fill=GOLD,anchor="mm"); d.text((W//2,900),f"Tips & Case Files: {support}",font=F(30),fill=GOLD,anchor="mm")
     pages.append(img)
@@ -573,21 +588,25 @@ make_bug()
 def silence(d): return AudioClip(lambda t:[0,0],d,fps=44100)
 SR=22050
 def sound_bed(dur,markers,hopeful=False):
-    n=int(dur*SR); t=np.arange(n)/SR; f1,f2=(66.0,82.5) if hopeful else (52.0,78.0)
-    bed=0.10*np.sin(2*np.pi*f1*t)*(0.6+0.4*np.sin(2*np.pi*0.11*t))+0.05*np.sin(2*np.pi*f2*t+1.3)
-    rng=np.random.default_rng(7); noise=np.convolve(rng.standard_normal(n),np.ones(40)/40,mode="same")
+    n=int(dur*SR); t=np.arange(n)/SR
+    root=55.0 if not hopeful else 65.4
+    pad=0.0
+    for off in (0,3,5,7):
+        f=root*(2**(off/12.0))
+        pad+=0.06*np.sin(2*np.pi*f*t)*(0.7+0.3*np.sin(2*np.pi*0.07*t+off))
+    bass=0.16*np.sin(2*np.pi*(root/2)*t)*(0.5+0.5*(np.sin(2*np.pi*2.0*t)>0))
+    rng=np.random.default_rng(7); hats=np.zeros(n)
+    step=int(0.5*SR); tk=int(0.02*SR); tt=np.arange(tk)/SR
+    hat=0.06*rng.standard_normal(tk)*np.exp(-120*tt)
+    for s in range(0,n-tk,step): hats[s:s+tk]+=hat
+    bed=pad+bass+hats
     for m in markers:
-        s,e=max(0,int((m-3)*SR)),int(m*SR)
-        if e>s:
-            seg=np.arange(e-s)/(e-s); bed[s:e]+=noise[s:e]*0.12*seg**2
-        s,e=int(m*SR),min(n,int((m+1.6)*SR)); tt=np.arange(e-s)/SR
-        bed[s:e]+=0.35*np.sin(2*np.pi*45*tt)*np.exp(-3*tt)
+        s,e=int(m*SR),min(n,int((m+1.8)*SR)); tt=np.arange(e-s)/SR
+        bed[s:e]+=0.5*np.sin(2*np.pi*40*tt)*np.exp(-2.5*tt)
     for dt in np.arange(45.0,dur,45.0):
-        s,e=int(dt*SR),min(n,int((dt+1.0)*SR)); tt=np.arange(e-s)/SR
-        bed[s:e]+=0.4*np.sin(2*np.pi*35*tt)*np.exp(-2*tt)
-    step=int(1.4*SR); tk=int(0.03*SR); tt=np.arange(tk)/SR; tick=0.05*np.sin(2*np.pi*1800*tt)*np.exp(-80*tt)
-    for s in range(0,n-tk,step): bed[s:s+tk]+=tick
-    bed=bed/np.max(np.abs(bed))*0.5
+        s,e=int(dt*SR),min(n,int((dt+1.2)*SR)); tt=np.arange(e-s)/SR
+        bed[s:e]+=0.5*np.sin(2*np.pi*32*tt)*np.exp(-2*tt)
+    bed=bed/np.max(np.abs(bed))*0.8
     return AudioArrayClip(np.stack([bed,bed],axis=1),fps=SR)
 def write_script(topic,series,angle,bible="",prefs=""):
     return qwen(DNA.format(topic=topic,series=series,angle=ANGLES[angle],bible=bible or bible_txt(),prefs=prefs or prefs_txt()))
@@ -608,15 +627,41 @@ def script_with_floor(topic,series,angle):
                 sc=write_script(topic,series,angle); g=quality_gate(topic,sc); sc=apply_gate(sc,g)
         except Exception: break
     return sc,g
+def _scene_clip(visual,footage,idx):
+    q=" ".join([w for w in visual.split() if len(w)>3][:8]) or "cinematic documentary b-roll"
+    vu=None
+    if footage=="real":
+        try: vu=pexels_clip(q)
+        except Exception: vu=None
+        if not vu:
+            for _ in range(2):
+                try: vu=wan_video(wan_video_prompt(visual)); break
+                except Exception: vu=None
+    elif footage=="auto":
+        if idx%2==0:
+            try: vu=pexels_clip(q)
+            except Exception: vu=None
+        if not vu:
+            for _ in range(2):
+                try: vu=wan_video(wan_video_prompt(visual)); break
+                except Exception: vu=None
+        if not vu:
+            try: vu=pexels_clip("cinematic documentary b-roll")
+            except Exception: vu=None
+    else:
+        for _ in range(2):
+            try: vu=wan_video(wan_video_prompt(visual)); break
+            except Exception: vu=None
+        if not vu:
+            try: vu=pexels_clip(q)
+            except Exception: vu=pexels_clip("cinematic documentary b-roll")
+    return vu
 def render_cold_open_preview(sc,voice,mood,ep):
     paths=[]
     for tag,txt in (("A",sc.get("cold_open_A","")),("B",sc.get("cold_open_B",""))):
         if not txt: continue
         ap=f"{TMP}/coldopen_{tag}_{ep}.mp3"; open(ap,"wb").write(speak(txt,voice,mood)); ac=AudioFileClip(ap)
-        vu=None
-        try: vu=wan_video(wan_video_prompt("intense single subject, gold rim light, matte black"))
-        except Exception: pass
-        if not vu: vu=pexels_clip("intense cinematic subject")
+        vu=_scene_clip("intense single subject, gold rim light, matte black","ai",0)
         vc=VideoFileClip(fetch(vu,f"cold_{tag}_{ep}.mp4")).without_audio().resized((1280,720)).with_fps(24)
         while vc.duration<ac.duration: vc=concatenate_videoclips([vc,vc.copy()])
         vc=vc.with_duration(ac.duration).with_audio(ac)
@@ -629,18 +674,14 @@ def sponsor_blocks(sp,voice,mood):
     b.append((ImageClip(card_img(sp["name"],"a word from our sponsor")).with_duration(ac.duration),ac,sp.get("script","")))
     b.append((ImageClip(card_img("NOW, BACK TO","the investigation")).with_duration(2.5),silence(2.5),None))
     return b
-def render(sc,topic,series,pilot,music,voice,mood,sp=None,angle="Dark expose (default)",supporters=None,live=None):
+def render(sc,topic,series,pilot,music,voice,mood,sp=None,angle="Dark expose (default)",supporters=None,live=None,interrupts=True,footage="ai"):
     scenes=sc["scenes"][:4] if pilot else sc["scenes"]; parts=[]; n=len(scenes); hopeful=angle in ("Comeback / positive","David vs Goliath")
     def L(stage,pct):
         if live: live(stage,pct)
     for i,s in enumerate(scenes):
         L(f"🎙️ Voicing + 🎥 filming scene {i+1}/{n}",0.05+0.6*i/n)
         ap=f"{TMP}/a{i}.mp3"; open(ap,"wb").write(speak(s["narration"],voice,mood)); ac=AudioFileClip(ap)
-        vu=None
-        for _ in range(2):
-            try: vu=wan_video(wan_video_prompt(s["visual"])); break
-            except Exception: vu=None
-        if not vu: vu=pexels_clip(" ".join(s["visual"].split()[:8]))
+        vu=_scene_clip(s["visual"],footage,i)
         vc=VideoFileClip(fetch(vu,f"c{i}.mp4")).without_audio().resized((1280,720)).with_fps(24)
         while vc.duration<ac.duration: vc=concatenate_videoclips([vc,vc.copy()])
         vc=vc.with_duration(ac.duration)
@@ -666,35 +707,56 @@ def render(sc,topic,series,pilot,music,voice,mood,sp=None,angle="Dark expose (de
     layers_a=[aud]
     if music and os.path.exists(music):
         mc=AudioFileClip(music); nn2=int(vid.duration//mc.duration)+1
-        layers_a.append(concatenate_videoclips([mc]*nn2).with_duration(vid.duration).with_volume_scaled(0.10))
+        layers_a.append(concatenate_videoclips([mc]*nn2).with_duration(vid.duration).with_volume_scaled(0.12))
     markers.append(vid.duration*0.68)
-    layers_a.append(sound_bed(vid.duration,markers,hopeful=hopeful).with_volume_scaled(0.6))
+    layers_a.append(sound_bed(vid.duration,markers,hopeful=hopeful).with_volume_scaled(0.4))
     final=vid.with_audio(CompositeAudioClip(layers_a).with_duration(vid.duration))
     layers=[final]
     if os.path.exists(f"{TMP}/bug.png"): layers.append(ImageClip(f"{TMP}/bug.png").resized(height=64).with_position((28,28)).with_duration(final.duration))
-    for dt in np.arange(45.0,final.duration-1,45.0): layers.append(pattern_interrupt(0.8).with_start(dt).with_position(("center","center")))
+    if interrupts:
+        for dt in np.arange(60.0,final.duration-1,60.0):
+            layers.append(pattern_interrupt(0.6).with_start(dt).with_position((0,0)))
     layers.append(ImageClip(card_img("IF YOU FOLLOW THE MONEY,","subscribe - new investigations weekly",transparent=True)).with_duration(5).with_start(final.duration*0.68).with_position((76,540)).with_effects([vfx.FadeIn(0.6),vfx.FadeOut(0.8)]))
+    bar=70
+    layers.append(ImageClip(np.zeros((bar,1280,3),dtype=np.uint8)).with_duration(final.duration).with_position((0,0)))
+    layers.append(ImageClip(np.zeros((bar,1280,3),dtype=np.uint8)).with_duration(final.duration).with_position((0,720-bar)))
     final=CompositeVideoClip(layers)
     L("📼 Encoding final cut",0.9)
     out=f"{TMP}/episode_{hashlib.md5(topic.encode()).hexdigest()}.mp4"
     final.write_videofile(out,codec="libx264",audio_codec="aac",fps=24,logger=None)
     return out,srt
-def shorts_three(vp,hooks,ep):
+def shorts_blockbuster(vp,hooks,ep,voice,mood,cold_open):
     outs=[]; vd=VideoFileClip(vp).duration
-    for k,s0 in enumerate([3,max(4,vd*0.35),max(5,vd*0.6)]):
-        c=VideoFileClip(vp).subclipped(s0,min(s0+32,vd-2)); c=c.resized(height=1920); w=c.size[0]
-        c=c.cropped(x1=(w-1080)//2,x2=(w-1080)//2+1080)
+    starts=[3,max(4,vd*0.35),max(5,vd*0.6)]
+    for k,s0 in enumerate(starts):
         hk=hooks[k] if k<len(hooks) else "FOLLOW THE MONEY"
-        c=CompositeVideoClip([c,ImageClip(ost_img(hk)).with_duration(min(4,c.duration)).with_start(0.5).with_position(("center",120))])
-        p=f"{TMP}/shorts_{ep}_{k}.mp4"; c.write_videofile(p,codec="libx264",audio_codec="aac",fps=24,logger=None); outs.append(p)
+        intro=ImageClip(vcard_img("SHADOW LEDGER",hk)).with_duration(1.6)
+        hook_txt=cold_open or hk
+        ap=f"{TMP}/shook_{ep}_{k}.mp3"; open(ap,"wb").write(speak(hook_txt,voice,mood)); hac=AudioFileClip(ap)
+        c=VideoFileClip(vp).subclipped(s0,min(s0+26,vd-2))
+        c=c.resized(height=1920); w=c.size[0]
+        c=c.cropped(x1=(w-1080)//2,x2=(w-1080)//2+1080)
+        ov=ImageClip(vost_img(hk)).with_duration(min(3,c.duration)).with_start(0.3).with_position((0,120))
+        body=CompositeVideoClip([c,ov])
+        endc=ImageClip(vcard_img("FULL FILM ON YOUTUBE","search: SHADOW LEDGER")).with_duration(2.2)
+        vis=concatenate_videoclips([intro,body,endc])
+        total=vis.duration
+        bed=sound_bed(total,[1.6+1])
+        hookclip=hac.with_start(1.6)
+        fin=vis.with_audio(CompositeAudioClip([bed.with_volume_scaled(0.4),hookclip]).with_duration(total))
+        p=f"{TMP}/shorts_{ep}_{k}.mp4"; fin.write_videofile(p,codec="libx264",audio_codec="aac",fps=24,logger=None)
+        outs.append(p)
     return outs
 def traffic_short(vp,hook):
     vd=VideoFileClip(vp).duration
     c=VideoFileClip(vp).subclipped(3,min(28,vd-6)); c=c.resized(height=1920); w=c.size[0]
     c=c.cropped(x1=(w-1080)//2,x2=(w-1080)//2+1080)
     intro=tiktok_intro(hook)
-    endc=ImageClip(card_img("FULL FILM ON YOUTUBE","search: SHADOW LEDGER")).with_duration(3).with_audio(silence(3))
-    fin=concatenate_videoclips([intro,CompositeVideoClip([c,ImageClip(ost_img(hook)).with_duration(min(4,c.duration)).with_start(3).with_position(("center",120))]),endc])
+    endc=ImageClip(vcard_img("FULL FILM ON YOUTUBE","search: SHADOW LEDGER")).with_duration(3)
+    vis=concatenate_videoclips([intro,CompositeVideoClip([c,ImageClip(vost_img(hook)).with_duration(min(4,c.duration)).with_start(3).with_position((0,120))]),endc])
+    total=vis.duration
+    bed=sound_bed(total,[2.5+1])
+    fin=vis.with_audio(bed.with_volume_scaled(0.4).with_duration(total))
     p=f"{TMP}/tiktok_traffic.mp4"; fin.write_videofile(p,codec="libx264",audio_codec="aac",fps=24,logger=None); return p
 def dubs(sc):
     full=" ".join(s["narration"] for s in sc["scenes"])[:6000]
@@ -712,29 +774,47 @@ def srt_text(srt):
         out.append(f"{i}\n{f(a)} --> {f(b)}\n{t}\n")
     return "\n".join(out)
 def thumbs(topic,hook):
-    urls=wan_images(f"YouTube thumbnail 1280x720: {topic}. single dramatic subject, gold rim light, matte black, teal shadows, no words")
-    ps=[]
-    for j,u in enumerate(urls):
-        img=Image.open(io.BytesIO(requests.get(u).content)).convert("RGB"); d=ImageDraw.Draw(img)
-        d.text((70,600),hook.upper(),font=F(92),fill=GOLD,stroke_width=6,stroke_fill=(0,0,0))
-        p=f"{TMP}/thumb_{j}.png"; img.save(p); ps.append(p)
+    ps=[]; hk=(hook or "FOLLOW THE MONEY").upper()
+    try:
+        urls=wan_images(f"YouTube thumbnail 1280x720: {topic}. single dramatic subject, gold rim light on matte black, teal shadows, 35mm grain, negative space left, no words")
+        for j,u in enumerate(urls):
+            img=Image.open(io.BytesIO(requests.get(u,timeout=30).content)).convert("RGB")
+            d=ImageDraw.Draw(img)
+            d.text((70,600),hk,font=F(92),fill=GOLD,stroke_width=6,stroke_fill=(0,0,0))
+            p=f"{TMP}/thumb_{j}.png"; img.save(p); ps.append(p)
+    except Exception:
+        ps=[]
+    if not ps:
+        for j in range(2):
+            img=Image.fromarray(card_img("SHADOW LEDGER",topic[:44]))
+            d=ImageDraw.Draw(img)
+            d.text((70,600),hk,font=F(92),fill=GOLD,stroke_width=6,stroke_fill=(0,0,0))
+            p=f"{TMP}/thumb_{j}.png"; img.save(p); ps.append(p)
     return ps
 CHECKLIST="YOUTUBE CHECKLIST — SHADOW LEDGER\n[ ] NOT made for kids\n[ ] Paid promotion: {sp}\n[ ] AdSense-scrubbed metadata\n[ ] Subtitles.srt\n[ ] End screen + cards\n[ ] Pin pinned_comment\n[ ] THUMB A/B\n[ ] Shorts on smart/manual days\n[ ] TikTok/Reels same day\n[ ] Schedule per smart/manual plan\n"
-RIGHTS="RIGHTS RECORD — original AI-assisted editorial; Pexels stock; licensed neural TTS; original procedural score; Case Files original compilation.\n"
+RIGHTS="RIGHTS RECORD — original AI-generated footage (Wan, one-of-a-kind per render); Pexels live-action stock where selected; licensed neural TTS; original procedural score; Case Files original compilation.\n"
 SHOP_BLURB="📄 THE CASE FILE — {topic}\nFull dossier: timeline, players, money, glossary, discussion. $5 pay-what-you-want.\n"
 def pack_entries(it,ep,support,shop,series,do_shorts3=True,do_dubs=False):
     entries=[]; sc=it["script"]; sl=slug(it["topic"]); extra={"shorts":[],"tiktok":None}
     tp=thumbs(it["topic"],sc.get("hook_words",""))
-    raw=qwen(f"Topic: {it['topic']}. Support: {support}. Pinned: {sc['pinned_question']}. Return JSON {{'title':'','description':'','tags':[15],'shorts_titles':[2]}}")
-    safe={"title":adsense_scrub(raw["title"]),"description":adsense_scrub(raw["description"]),"tags":[adsense_scrub(t) for t in raw["tags"]],"shorts_titles":[adsense_scrub(t) for t in raw["shorts_titles"]]}
+    try:
+        raw=qwen(f"Topic: {it['topic']}. Support: {support}. Pinned: {sc['pinned_question']}. Return JSON {{'title':'','description':'','tags':[15],'shorts_titles':[2]}}")
+    except Exception:
+        raw={"title":it["topic"][:60],"description":f"{it['topic']} — a Shadow Ledger investigation. {support}","tags":["finance","documentary"],"shorts_titles":[]}
+    safe={"title":adsense_scrub(raw.get("title",it["topic"][:60])),"description":adsense_scrub(raw.get("description","")),"tags":[adsense_scrub(t) for t in raw.get("tags",[])],"shorts_titles":[adsense_scrub(t) for t in raw.get("shorts_titles",[])]}
+    voice=jload(SET_F,{}).get("voice","longanyang")
     if do_shorts3:
         hooks=(safe["shorts_titles"]+[sc.get("share_line","FOLLOW THE MONEY")])[:3]
-        spaths=shorts_three(it["out"],hooks,ep); extra["shorts"]=spaths
+        spaths=shorts_blockbuster(it["out"],hooks,ep,voice,"Calm investigator (default)",sc.get("cold_open_A",""))
+        extra["shorts"]=spaths
         for k,p in enumerate(spaths): entries.append((f"SHORTS_{k+1}_{ep}_{sl}.mp4",p,True))
         tk=traffic_short(it["out"],hooks[0]); extra["tiktok"]=tk; entries.append((f"TIKTOK_TRAFFIC_{ep}_{sl}.mp4",tk,True))
     if do_dubs:
         for lang,p in dubs(sc).items(): entries.append((f"DUB_{lang}_{ep}.mp3",p,True))
-    dos=qwen(f"Topic: {it['topic']}. Return JSON dossier {{'timeline':[],'key_players':[],'follow_the_money':[],'glossary':[],'discussion':[]}}")
+    try:
+        dos=qwen(f"Topic: {it['topic']}. Return JSON dossier {{'timeline':[],'key_players':[],'follow_the_money':[],'glossary':[],'discussion':[]}}")
+    except Exception:
+        dos={"timeline":[],"key_players":[],"follow_the_money":[],"glossary":[],"discussion":[]}
     cfp=f"{TMP}/case_file_{ep}.pdf"; case_file_pdf(it["topic"],series,dos,support,cfp,ep=ep)
     entries.append((f"EPISODE_{ep}_{sl}.mp4",it["out"],True))
     for j,p in enumerate(tp): entries.append((f"THUMB_{'AB'[j]}_{ep}_{sl}.png",p,True))
@@ -747,12 +827,13 @@ def pack_entries(it,ep,support,shop,series,do_shorts3=True,do_dubs=False):
     entries.append(("rights_record.txt",RIGHTS.encode(),False))
     return entries,safe,extra
 
-# ---------------- BACKGROUND WORKER ----------------
 def batch_worker(topics=None,auto_upload=False,auto_schedule=True,auto_feed=False):
     JOB=job_load(); JOB["running"]=True; JOB["log"]=[]; job_save(JOB)
     S=jload(SET_F,{})
     phase=ramp_advisor()["phase"]
     manual=S.get("manual",False)
+    interrupts=S.get("interrupts",True)
+    footage=S.get("footage","ai")
     ep_day=S.get("ep_day","Friday"); ep_time=S.get("ep_time","21:00")
     sh_day=S.get("sh_day","Monday"); sh_time=S.get("sh_time","17:00")
     line=load_line()
@@ -771,9 +852,9 @@ def batch_worker(topics=None,auto_upload=False,auto_schedule=True,auto_feed=Fals
             m_use=mood_for(idx) if S.get("auto_mood",True) else S.get("mood","Calm investigator (default)")
             sp=jload(SPO_F,None); it["sp"]=sp["name"] if (sp and sp.get("approved")) else ""
             sups=jload(SUP_F,[]) or None
-            out,srt=render(it["script"],it["topic"],S.get("series","The Monopoly Files"),S.get("pilot",True),S.get("music"),S.get("voice","longanyang"),m_use,sp,angle=it.get("angle") or "Dark expose (default)",supporters=sups,live=live)
+            out,srt=render(it["script"],it["topic"],S.get("series","The Monopoly Files"),S.get("pilot",False),S.get("music"),S.get("voice","longanyang"),m_use,sp,angle=it.get("angle") or "Dark expose (default)",supporters=sups,live=live,interrupts=interrupts,footage=footage)
             it["out"],it["srt"],it["status"],it["err"]=out,srt,"rendered",""
-            el=int(time.time()-t0); secs,cost=estimate(it["script"],S.get("pilot",True))
+            el=int(time.time()-t0); secs,cost=estimate(it["script"],S.get("pilot",False))
             costs=jload(COST_F,[]); costs.append({"ep":idx+1,"est":round(cost,3)}); jsave(COST_F,costs)
             JOB["log"].append(f"✅ EP {idx+1} rendered {el//60}m{el%60:02d}s")
             if auto_upload and not it.get("yt_id") and (os.path.exists(YT_TOK_F) or YT_RT):
@@ -787,7 +868,8 @@ def batch_worker(topics=None,auto_upload=False,auto_schedule=True,auto_feed=Fals
                         it["yt_id"]=vid
                         JOB["log"].append(f"☁️ Uploaded {'scheduled '+when if when else 'private'}: {vid}")
                         hooks=(safe["shorts_titles"]+[it["script"].get("share_line","FOLLOW THE MONEY")])[:3]
-                        for k,p in enumerate(shorts_three(out,hooks,f"{idx+1:03d}")):
+                        spaths=shorts_blockbuster(out,hooks,f"{idx+1:03d}",S.get("voice","longanyang"),m_use,it["script"].get("cold_open_A",""))
+                        for k,p in enumerate(spaths):
                             try:
                                 sw=(occ(sh_day,sh_time,add_days=k*2) if manual else smart_sh_when(phase,k)) if auto_schedule else None
                                 yt_upload(p,(safe["shorts_titles"][k] if k<len(safe["shorts_titles"]) else "Follow the money")+" #shorts","Full film on Shadow Ledger.",["shorts","finance"],when=sw)
@@ -817,7 +899,7 @@ def revenue_forecast():
     tot=mk+mc+my
     return {"subs":r*80,"hrs":r*40,"yt_ready":(r*80>=1000 and r*40>=4000),"usd":tot,"zar":tot*18.5,"target":tot*18.5>=100000}
 
-# ---------------- UI (v46) ----------------
+# ---------------- UI (v50) ----------------
 st.set_page_config(page_title="Shadow Ledger Studio",page_icon="🎬",layout="wide")
 st.markdown("""<style>
  .stApp{background:radial-gradient(1200px 600px at 80% -10%,#14304f66,transparent),linear-gradient(180deg,#070d18,#0b1526 60%,#081020);}
@@ -870,8 +952,11 @@ ep_num=st.sidebar.text_input("Episode #","001")
 voice=st.sidebar.text_input("🎙️ Narrator voice ID","longanyang")
 auto_mood=st.sidebar.checkbox("🎭 Auto-rotate mood (recommended)",True)
 mood=st.sidebar.selectbox("🎭 Manual mood (if auto OFF)",list(MOODS))
+footage_sel=st.sidebar.selectbox("🎥 Footage source",["AI-unique (Wan) — signature look","Auto (AI + real B-roll mix)","Real stock (Pexels)"],index=0)
+FMAP={"AI-unique (Wan) — signature look":"ai","Auto (AI + real B-roll mix)":"auto","Real stock (Pexels)":"real"}
 auto_upload=st.sidebar.checkbox("☁️ Auto-upload after render",True)
 auto_schedule=st.sidebar.checkbox("🤖 Smart auto-schedule",True)
+interrupts=st.sidebar.checkbox("⚡ Pattern interrupts (subtle)",True)
 manual=st.sidebar.checkbox("✋ Manual schedule (I choose)",False)
 if manual:
     ep_day=st.sidebar.selectbox("📅 Episode day",DAYS,index=4)
@@ -881,6 +966,7 @@ if manual:
 else:
     ep_day,ep_time,sh_day,sh_time="Friday","21:00","Monday","17:00"
 auto_feed=st.sidebar.checkbox("🤖 Auto-feed ≥80 predictions",False)
+pilot=st.sidebar.checkbox("🎬 PILOT MODE (60-90s test) — OFF for full episodes",False)
 music=st.sidebar.file_uploader("🎵 YOUR theme music (optional)",type=["mp3","wav"])
 music_path=None
 if music: music_path=f"{TMP}/house_{music.name}"; open(music_path,"wb").write(music.getbuffer())
@@ -916,10 +1002,15 @@ with st.sidebar.expander("🔑 Connect + Vault (on-demand)"):
     if st.button("🔄 Recover rendered videos from YouTube"):
         with st.spinner("🔄 Scanning your channel…"):
             ups=yt_channel_uploads(); line=load_line(); hits=0
-            for vid,title in ups:
-                for it in line:
-                    if it["topic"] and it["topic"][:25].lower() in title.lower() and it["status"]!="rendered":
-                        it["yt_id"]=vid; it["status"]="rendered"; hits+=1
+            byid={v:t for v,t in ups}
+            for it in line:
+                if it["status"]=="rendered": continue
+                if it.get("yt_id") and it["yt_id"] in byid:
+                    it["status"]="rendered"; hits+=1; continue
+                if it["topic"]:
+                    for vid,title in ups:
+                        if _match(it["topic"],title):
+                            it["yt_id"]=vid; it["status"]="rendered"; hits+=1; break
             save_line(line); st.session_state.line=load_line()
         st.success(f"✅ Re-linked {hits} episode(s).")
     if st.button("☁️ Backup line to Vault"):
@@ -932,8 +1023,7 @@ with st.sidebar.expander("🔑 Connect + Vault (on-demand)"):
 adv=balance_advice(line)
 angle_list=list(ANGLES)
 angle=st.sidebar.selectbox("Story angle",angle_list,index=angle_list.index(adv) if adv in angle_list else 0)
-pilot=st.sidebar.checkbox("PILOT MODE (60-90s)",True)
-jsave(SET_F,{"series":series,"pilot":pilot,"auto_mood":auto_mood,"mood":mood,"angle":angle,"voice":voice,"music":music_path,"support":support,"ep_day":ep_day,"ep_time":ep_time,"sh_day":sh_day,"sh_time":sh_time,"manual":manual})
+jsave(SET_F,{"series":series,"pilot":pilot,"auto_mood":auto_mood,"mood":mood,"angle":angle,"voice":voice,"music":music_path,"support":support,"ep_day":ep_day,"ep_time":ep_time,"sh_day":sh_day,"sh_time":sh_time,"manual":manual,"interrupts":interrupts,"footage":FMAP[footage_sel]})
 tab1,tab2,tabS,tab3,tab4=st.tabs(["🥚 1·SCAN","🏭 2·PRODUCE","💼 SPONSOR","📦 3·PUBLISH","📈 STRATEGY"])
 
 def guide(steps):
@@ -1046,6 +1136,14 @@ with tab2:
         if st.session_state.get("splan"):
             spn=st.session_state.splan
             st.markdown(f"**Verdict:** {'✅ series' if spn.get('series') else '❌ standalone'} — {spn.get('why','')}")
+            st.markdown("<div class='section'>📚 SERIES BIBLE — episode plan</div>",unsafe_allow_html=True)
+            for i,e in enumerate(spn.get("episodes",[])):
+                scr=next((x for x in line if x["topic"]==e and x.get("script")),None)
+                prev=scr["script"]["scenes"][0]["narration"][:120] if scr else "script pending…"
+                st.markdown(f"<div class='card'><b>EP {i+1} · {e}</b><br/><span style='color:#9fb3d1'>{prev}…</span></div>",unsafe_allow_html=True)
+            st.markdown("<div class='section'>📱 SHORTS PLAN — hooks & prompts</div>",unsafe_allow_html=True)
+            for i,e in enumerate(spn.get("episodes",[])):
+                st.markdown(f"<div class='card'><b>EP{i+1} Shorts:</b> 1) “{e} — the truth” 2) cold-open hook + bass drop 3) reveal teaser → end card “FULL FILM ON YOUTUBE”</div>",unsafe_allow_html=True)
             if spn.get("series") and st.button("➕ ADD SERIES"):
                 base_sc=(line[0].get("score",60) if line else 60)
                 for e in spn.get("episodes",[]): queue_topic(e,base_sc,"SERIES")
@@ -1096,10 +1194,11 @@ with tab2:
             st.markdown(f"<div class='card'>{'✅' if hrec['status']=='completed' else '⚠️'} EP {hrec['ep']} {hrec['topic']} — {hrec['status']} · {hrec['took']}</div>",unsafe_allow_html=True)
         rendered=[i for i in line if i["status"]=="rendered" and i["out"] and os.path.exists(i["out"])]
         if rendered:
-            st.markdown("### 📥 Downloads + ☁️ Uploads")
+            st.markdown("### 📥 Downloads + ☁️ Uploads + ▶️ Watch")
             for i2,it in enumerate(rendered):
                 ep=f"{int(ep_num)+i2:03d}"; sl=slug(it["topic"])
                 st.video(it["out"])
+                if it.get("yt_id"): st.markdown(f"[▶️ **Watch on YouTube**](https://www.youtube.com/watch?v={it['yt_id']})")
                 c1,c2,c3=st.columns(3)
                 c1.download_button("⬇️ MP4",open(it["out"],"rb").read(),f"EPISODE_{ep}_{sl}.mp4",key=f"dl_{ep}")
                 if c2.button(f"📦 PACK {ep}",key=f"pk_{ep}"):
@@ -1127,24 +1226,26 @@ with tab3:
     else:
         ch=st.selectbox("Episode to pack",[i["topic"] for i in rendered])
         it=rendered[[i["topic"] for i in rendered].index(ch)]
+        if it.get("yt_id"): st.markdown(f"[▶️ **Watch on YouTube**](https://www.youtube.com/watch?v={it['yt_id']})")
         if st.button("📦 BUILD PUBLISH PACK"):
-            entries,safe,extra=pack_entries(it,ep_num,support,shop,series)
-            z=io.BytesIO()
-            with zipfile.ZipFile(z,"w") as zf:
-                for n,d,ip in entries:
-                    if ip: zf.write(d,n)
-                    else: zf.writestr(n,d)
-            st.session_state.packed=True
-            st.download_button("📦 DOWNLOAD PACK",z.getvalue(),f"SHADOW_LEDGER_PACK_{ep_num}.zip")
-            st.success("✅ Pack ready.")
+            try:
+                entries,safe,extra=pack_entries(it,ep_num,support,shop,series)
+                z=io.BytesIO()
+                with zipfile.ZipFile(z,"w") as zf:
+                    for n,d,ip in entries:
+                        if ip: zf.write(d,n)
+                        else: zf.writestr(n,d)
+                st.session_state.packed=True
+                st.download_button("📦 DOWNLOAD PACK",z.getvalue(),f"SHADOW_LEDGER_PACK_{ep_num}.zip")
+                st.success("✅ Pack ready.")
+            except Exception as e:
+                st.error(f"Pack hiccup: {str(e)[:120]} — try again.")
 
 with tab4:
     st.caption("Your money dashboard: revenue forecast + ramp phase + YPP readiness.")
     rf=revenue_forecast()
     st.markdown(f"**Projected:** ${rf['usd']:.0f}/mo ≈ R{rf['zar']:.0f} · Subs ~{rf['subs']} · {'✅ YPP-ready' if rf['yt_ready'] else '⏳ building'}")
     if rf["target"]: st.success("🏆 R100k/month TARGET REACHED")
-    st.markdown("""**v46 — FINAL, CLEAN, FOOLPROOF.** Everything remembered & fixed: zero-network boot (no hang), no crash on empty
-    lists, tab-2 unlock after reboot, resume-where-stopped, no double-upload, scan memory survives reboot, human-grade
-    normalized voice + best-model-first TTS, Vault on-demand, live ops + history, smart schedule, PRESTIGE, Pilot, Hunt,
-    Anticipation, analytics, Hall of Fame, dubs, sponsor, forecast, glowing guide. **Paste, commit (after renders land),
-    reboot once — then it simply works.** 🎬""")
+    st.markdown("""**v50 — UNIQUE + CINEMATIC.** Footage source toggle (default AI-unique Wan = one-of-a-kind per render); cinematic
+    letterbox + hardened no-text prompts; audible procedural score; blockbuster Shorts; SERIES BIBLE + SHORTS PLAN; all
+    prior fixes. **Your signature look is AI-unique, graded, and scored — render and see the difference.** 🎬""")
