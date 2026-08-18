@@ -573,7 +573,8 @@ def script_with_floor(topic,series,angle):
     return sc,g
 def write_script(topic,series,angle,bible="",prefs=""):
     return qwen(DNA.format(topic=topic,series=series,angle=ANGLES[angle],bible=bible or bible_txt(),prefs=prefs or prefs_txt()))
-    def card_img(title,sub="",w=1280,h=720,transparent=False):
+    
+      def card_img(title,sub="",w=1280,h=720,transparent=False):
     img=Image.new("RGBA" if transparent else "RGB",(w,h),(0,0,0,0) if transparent else BLACK)
     d=ImageDraw.Draw(img)
     if not transparent: d.rectangle([0,h//2-90,w,h//2+90],fill=(8,9,12))
