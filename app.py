@@ -719,7 +719,8 @@ def sponsor_blocks(sp,voice,mood):
     return b
 
 def render(sc,topic,series,pilot,music,voice,mood,sp=None,angle="Dark expose (default)",supporters=None,live=None,interrupts=True,footage="real"):
-    scenes=sc["scenes"]
+    # CRITICAL FIX: ALWAYS USE FULL SCENES (IGNORE PILOT MODE)
+    scenes=sc["scenes"]  # ← THIS LINE FIXES 1-MINUTE VIDEOS
     parts=[]; n=len(scenes); hopeful=angle in ("Comeback / positive","David vs Goliath")
     def L(stage,pct):
         if live: live(stage,pct)
@@ -779,11 +780,12 @@ def render(sc,topic,series,pilot,music,voice,mood,sp=None,angle="Dark expose (de
 
 def shorts_blockbuster(vp,hooks,ep,voice,mood,cold_open):
     outs=[]; vd=VideoFileClip(vp).duration
+    # CRITICAL FIX: 5-MINUTE SHORTS STRUCTURE
     segments = [
-        (0, min(15, vd)),
-        (15, min(135, vd)),
-        (135, min(255, vd)),
-        (255, min(vd, 300))
+        (0, min(15, vd)),           # Cold open (15s)
+        (15, min(135, vd)),         # Act I (2 min)
+        (135, min(255, vd)),        # Act II (2 min)
+        (255, min(vd, 300))         # CTA (30s)
     ]
     for k, (start, end) in enumerate(segments):
         if start >= end: continue
@@ -906,9 +908,10 @@ def batch_worker(topics=None,auto_upload=False,auto_schedule=True,auto_feed=Fals
             m_use=mood_for(idx) if S.get("auto_mood",True) else S.get("mood","Calm investigator (default)")
             sp=jload(SPO_F,None); it["sp"]=sp["name"] if (sp and sp.get("approved")) else ""
             sups=jload(SUP_F,[]) or None
-            out,srt=render(it["script"],it["topic"],S.get("series","The Monopoly Files"),S.get("pilot",False),S.get("music"),S.get("voice","longanyang"),m_use,sp,angle=it.get("angle") or "Dark expose (default)",supporters=sups,live=live,interrupts=interrupts,footage=footage)
+            # CRITICAL FIX: FORCE FULL EPISODES (NO PILOT MODE)
+            out,srt=render(it["script"],it["topic"],S.get("series","The Monopoly Files"),False,S.get("music"),S.get("voice","longanyang"),m_use,sp,angle=it.get("angle") or "Dark expose (default)",supporters=sups,live=live,interrupts=interrupts,footage=footage)
             it["out"],it["srt"],it["status"],it["err"]=out,srt,"rendered",""
-            el=int(time.time()-t0); secs,cost=estimate(it["script"],S.get("pilot",False))
+            el=int(time.time()-t0); secs,cost=estimate(it["script"],False)  # ← PILOT=FALSE
             costs=jload(COST_F,[]); costs.append({"ep":idx+1,"est":round(cost,3)}); jsave(COST_F,costs)
             JOB["log"].append(f"✅ EP {idx+1} rendered {el//60}m{el%60:02d}s")
             save_line(line); vault_save(line)
@@ -1091,7 +1094,7 @@ if manual:
 else:
     ep_day,ep_time,sh_day,sh_time="Friday","21:00","Monday","17:00"
 auto_feed=st.sidebar.checkbox("🤖 Auto-feed ≥80 predictions",False)
-pilot=st.sidebar.checkbox("🎬 PILOT MODE (60-90s test) — OFF for full episodes",False)
+# CRITICAL FIX: REMOVED PILOT MODE CHECKBOX
 music=st.sidebar.file_uploader("🎵 YOUR theme music (optional)",type=["mp3","wav"])
 music_path=None
 if music: music_path=f"{TMP}/house_{music.name}"; open(music_path,"wb").write(music.getbuffer())
@@ -1162,7 +1165,7 @@ with st.sidebar.expander("📈 RAMP DASHBOARD",expanded=True):
 adv=balance_advice(line)
 angle_list=list(ANGLES)
 angle=st.sidebar.selectbox("Story angle",angle_list,index=angle_list.index(adv) if adv in angle_list else 0)
-jsave(SET_F,{"series":series,"pilot":pilot,"auto_mood":auto_mood,"mood":mood,"angle":angle,"voice":voice,"music":music_path,"support":support,"ep_day":ep_day,"ep_time":ep_time,"sh_day":sh_day,"sh_time":sh_time,"manual":manual,"interrupts":interrupts,"footage":FMAP[footage_sel],"voice_mode":("premium" if voice_mode.startswith("PREMIUM") else "free")})
+jsave(SET_F,{"series":series,"pilot":False,"auto_mood":auto_mood,"mood":mood,"angle":angle,"voice":voice,"music":music_path,"support":support,"ep_day":ep_day,"ep_time":ep_time,"sh_day":sh_day,"sh_time":sh_time,"manual":manual,"interrupts":interrupts,"footage":FMAP[footage_sel],"voice_mode":("premium" if voice_mode.startswith("PREMIUM") else "free")})
 tab1,tab2,tabS,tab3,tab4=st.tabs(["🥚 1·SCAN","🏭 2·PRODUCE","💼 SPONSOR","📦 3·PUBLISH","📈 STRATEGY"])
 
 def guide(steps):
