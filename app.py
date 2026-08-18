@@ -120,7 +120,8 @@ def ramp_advisor():
     ramp["phase"]=ph
     ramp_state_save(ramp)
     return {"phase":ph,"rec":rec,"go":go,"n":n,"ctr":avg,"ramp":ramp}
-    _MC={"t":0.0,"ids":[]}
+
+_MC={"t":0.0,"ids":[]}
 def list_models():
     if time.time()-_MC["t"]>21600:
         try:
@@ -573,7 +574,8 @@ def script_with_floor(topic,series,angle):
     return sc,g
 def write_script(topic,series,angle,bible="",prefs=""):
     return qwen(DNA.format(topic=topic,series=series,angle=ANGLES[angle],bible=bible or bible_txt(),prefs=prefs or prefs_txt()))
-    def card_img(title,sub="",w=1280,h=720,transparent=False):
+
+def card_img(title,sub="",w=1280,h=720,transparent=False):
     img=Image.new("RGBA" if transparent else "RGB",(w,h),(0,0,0,0) if transparent else BLACK)
     d=ImageDraw.Draw(img)
     if not transparent: d.rectangle([0,h//2-90,w,h//2+90],fill=(8,9,12))
@@ -581,6 +583,7 @@ def write_script(topic,series,angle,bible="",prefs=""):
     if sub: d.text((w//2,h//2+50),sub,font=F(30),fill=(220,220,220),anchor="mm")
     d.rectangle([w//2-260,h//2+95,w//2+260,h//2+98],fill=GOLD)
     return np.array(img)
+
 def vcard_img(title,sub=""):
     img=Image.new("RGB",(1080,1920),BLACK); d=ImageDraw.Draw(img)
     d.rectangle([60,820,1020,1100],fill=(8,9,12))
@@ -589,16 +592,19 @@ def vcard_img(title,sub=""):
         for k,ln in enumerate(textwrap.wrap(sub,24)[:3]): d.text((540,1140+k*50),ln,font=F(34),fill=(220,220,220),anchor="mm")
     d.rectangle([420,1180,660,1186],fill=GOLD)
     return np.array(img)
+
 def credits_img(names):
     img=Image.new("RGB",(1280,720),BLACK); d=ImageDraw.Draw(img)
     d.rectangle([40,40,1240,680],outline=GOLD,width=2)
     d.text((640,140),"SUPPORTERS OF THE LEDGER",font=F(56),fill=GOLD,anchor="mm")
     for k,ln in enumerate(textwrap.wrap(" · ".join(names),58)[:4]): d.text((640,300+k*72),ln,font=F(34),fill=(230,230,230),anchor="mm")
     return np.array(img)
+
 def ost_img(text):
     img=Image.new("RGBA",(1280,160),(0,0,0,0)); d=ImageDraw.Draw(img)
     d.text((640,80),text.upper(),font=F(72),fill=GOLD,anchor="mm",stroke_width=5,stroke_fill=(0,0,0))
     return np.array(img)
+
 def vost_img(text):
     img=Image.new("RGBA",(1080,100),(0,0,0,0)); d=ImageDraw.Draw(img)
     lines = textwrap.wrap(text.upper(), 35)
@@ -607,17 +613,20 @@ def vost_img(text):
         d.text((540, y), line, font=F(28), fill=GOLD, anchor="mm", stroke_width=2, stroke_fill=(0,0,0))
         y += 32
     return np.array(img)
+
 def pattern_interrupt(dur=0.6):
     img=Image.new("RGBA",(1280,720),(0,0,0,0)); d=ImageDraw.Draw(img)
     d.rectangle([0,640,1280,720],fill=(0,0,0,150))
     d.rectangle([40,676,560,684],fill=GOLD)
     d.text((60,660),"FOLLOW THE MONEY",font=F(28),fill=GOLD,anchor="lm")
     return ImageClip(np.array(img)).with_duration(dur)
+
 def tiktok_intro(hook):
     img=Image.new("RGB",(1080,1920),BLACK); d=ImageDraw.Draw(img)
     d.text((540,800),"WHAT YOU'RE ABOUT",font=F(80),fill=GOLD,anchor="mm"); d.text((540,900),"TO SEE",font=F(80),fill=GOLD,anchor="mm")
     for k,ln in enumerate(textwrap.wrap(hook.upper(),20)[:4]): d.text((540,1100+k*80),ln,font=F(48),fill=(230,230,230),anchor="mm")
     return ImageClip(np.array(img)).with_duration(2.5)
+
 def case_file_pdf(topic,series,dos,support,path,ep="001"):
     W,H=1240,1754; pages=[]
     def blank():
@@ -642,6 +651,7 @@ def case_file_pdf(topic,series,dos,support,path,ep="001"):
     d.text((W//2,900),f"Tips & Case Files: {support}",font=F(30),fill=GOLD,anchor="mm")
     pages.append(img)
     pages[0].save(path,save_all=True,append_images=pages[1:]); return path
+
 def image_ad_clip(p,name):
     im=Image.open(p).convert("RGB"); w,h=im.size; tw,th=w/h,16/9
     if tw>th:
@@ -651,12 +661,15 @@ def image_ad_clip(p,name):
     im=im.resize((1280,720),Image.LANCZOS); d=ImageDraw.Draw(im)
     d.rectangle([0,640,1280,720],fill=(5,6,8)); d.text((40,680),f"SPONSOR · {name.upper()}",font=F(34),fill=GOLD,anchor="lm")
     return ImageClip(np.array(im))
+
 def make_bug():
     if os.path.exists("assets/sl_logo.png") and not os.path.exists(f"{TMP}/bug.png"):
         a=np.array(Image.open("assets/sl_logo.png").convert("RGBA")); m=a[...,:3].sum(axis=2)<135; a[m,3]=0; a[~m,3]=150
         img=Image.fromarray(a); w,h=img.size; img.resize((int(w*160/h),160),Image.LANCZOS).save(f"{TMP}/bug.png")
 make_bug()
+
 def silence(d): return AudioClip(lambda t:[0,0],d,fps=44100)
+
 SR=22050
 def sound_bed(dur,markers,hopeful=False):
     n=int(dur*SR); t=np.arange(n)/SR
@@ -684,6 +697,7 @@ def sound_bed(dur,markers,hopeful=False):
         bed[s:e]*=0.15
     bed=bed/np.max(np.abs(bed))*0.8
     return AudioArrayClip(np.stack([bed,bed],axis=1),fps=SR)
+
 def render_cold_open_preview(sc,voice,mood,ep):
     paths=[]
     for tag,txt in (("A",sc.get("cold_open_A","")),("B",sc.get("cold_open_B",""))):
@@ -696,12 +710,14 @@ def render_cold_open_preview(sc,voice,mood,ep):
         out=f"{TMP}/coldopen_{tag}_{ep}.mp4"; vc.write_videofile(out,codec="libx264",audio_codec="aac",fps=24,logger=None)
         paths.append((tag,out,txt))
     return paths
+
 def sponsor_blocks(sp,voice,mood):
     b=[(ImageClip(card_img("A WORD FROM",sp["name"])).with_duration(2.5),silence(2.5),None)]
     ap=f"{TMP}/sp.mp3"; open(ap,"wb").write(speak(sp.get("script") or f"This investigation is brought to you by {sp['name']}.",voice,mood)); ac=AudioFileClip(ap)
     b.append((ImageClip(card_img(sp["name"],"a word from our sponsor")).with_duration(ac.duration),ac,sp.get("script","")))
     b.append((ImageClip(card_img("NOW, BACK TO","the investigation")).with_duration(2.5),silence(2.5),None))
     return b
+
 def render(sc,topic,series,pilot,music,voice,mood,sp=None,angle="Dark expose (default)",supporters=None,live=None,interrupts=True,footage="real"):
     scenes=sc["scenes"]
     parts=[]; n=len(scenes); hopeful=angle in ("Comeback / positive","David vs Goliath")
@@ -760,6 +776,7 @@ def render(sc,topic,series,pilot,music,voice,mood,sp=None,angle="Dark expose (de
     out=f"{TMP}/episode_{hashlib.md5(topic.encode()).hexdigest()}.mp4"
     final.write_videofile(out,codec="libx264",audio_codec="aac",fps=24,logger=None)
     return out,srt
+
 def shorts_blockbuster(vp,hooks,ep,voice,mood,cold_open):
     outs=[]; vd=VideoFileClip(vp).duration
     segments = [
@@ -791,8 +808,10 @@ def shorts_blockbuster(vp,hooks,ep,voice,mood,cold_open):
         fin.write_videofile(p, codec="libx264", audio_codec="aac", fps=24, logger=None)
         outs.append(p)
     return outs
+
 def traffic_short(vp,hook):
     return shorts_blockbuster(vp,[hook],"tiktok","longanyang","Calm investigator (default)",hook)[0]
+
 def dubs(sc):
     full=" ".join(s["narration"] for s in sc["scenes"])[:6000]
     tr=qwen(f"Translate to Spanish and German. Return JSON {{'es':'','de':''}}: {full}")
@@ -802,12 +821,14 @@ def dubs(sc):
             p=f"{TMP}/dub_{lang}.mp3"; asyncio.run(edge_tts.Communicate(normalize_tts(tr.get(lang,"")),v).save(p)); outs[lang]=p
         except Exception: pass
     return outs
+
 def srt_text(srt):
     out=[]
     for i,(a,b,t) in enumerate(srt,1):
         f=lambda s:f"{int(s//3600):02d}:{int(s%3600//60):02d}:{int(s%60):02d},000"
         out.append(f"{i}\n{f(a)} --> {f(b)}\n{t}\n")
     return "\n".join(out)
+
 def thumbs(topic,hook):
     ps=[]; hk=(hook or "FOLLOW THE MONEY").upper()
     img=Image.new("RGB",(1280,720),BLACK)
@@ -821,9 +842,11 @@ def thumbs(topic,hook):
     d2.text((70,500),topic[:30],font=F(60),fill=(220,220,220))
     p2=f"{TMP}/thumb_B.png"; img2.save(p2); ps.append(p2)
     return ps
+
 CHECKLIST="YOUTUBE CHECKLIST — SHADOW LEDGER\n[ ] NOT made for kids\n[ ] Paid promotion: {sp}\n[ ] AdSense-scrubbed metadata\n[ ] Subtitles.srt\n[ ] End screen + cards\n[ ] Pin pinned_comment\n[ ] THUMB A/B\n[ ] Shorts on smart/manual days\n[ ] TikTok/Reels same day\n[ ] Schedule per smart/manual plan\n"
 RIGHTS="RIGHTS RECORD — real stock footage via Pexels & Pixabay (free commercial licenses); licensed/Google neural TTS; original procedural score & sound design; Case Files original compilation.\n"
 SHOP_BLURB="📄 THE CASE FILE — {topic}\nFull dossier: timeline, players, money, glossary, discussion. $5 pay-what-you-want.\n"
+
 def pack_entries(it,ep,support,shop,series,do_shorts3=True,do_dubs=False):
     entries=[]; sc=it["script"]; sl=slug(it["topic"]); extra={"shorts":[],"tiktok":None}
     tp=thumbs(it["topic"],sc.get("hook_words",""))
@@ -856,7 +879,8 @@ def pack_entries(it,ep,support,shop,series,do_shorts3=True,do_dubs=False):
     entries.append(("upload_checklist.txt",CHECKLIST.format(sp=it.get("sp","") or "No").encode(),False))
     entries.append(("rights_record.txt",RIGHTS.encode(),False))
     return entries,safe,extra
-    def batch_worker(topics=None,auto_upload=False,auto_schedule=True,auto_feed=False):
+
+def batch_worker(topics=None,auto_upload=False,auto_schedule=True,auto_feed=False):
     JOB=job_load(); JOB["running"]=True; JOB["log"]=[]; job_save(JOB); vault_save_job(JOB)
     S=jload(SET_F,{})
     phase=ramp_advisor()["phase"]
@@ -935,6 +959,7 @@ Return JSON {{
             JOB["log"].append(f"🤖 Auto-feed queued {n}")
         except Exception: pass
     JOB["running"]=False; JOB["current"]=""; job_save(JOB); vault_save_job(JOB)
+
 def revenue_forecast():
     rev=jload(REV_F,{"kofi_tips":[],"case_files":[]}); line=load_line()
     r=len([i for i in line if i["status"]=="rendered"])
@@ -942,12 +967,15 @@ def revenue_forecast():
     my=r*150 if (r*80>=1000 and r*40>=4000) else 0
     tot=mk+mc+my
     return {"subs":r*80,"hrs":r*40,"yt_ready":(r*80>=1000 and r*40>=4000),"usd":tot,"zar":tot*18.5,"target":tot*18.5>=100000}
+
 def yt_upload(path,title,desc,tags,when=None,thumb=None):
     from googleapiclient.http import MediaFileUpload
     svc=yt_service()
     if not svc: return None
+    
     seo_desc = f"{desc}\n\n🔍 This investigation covers: {', '.join(tags[:5])}. Support independent journalism: {support}"
     seo_tags = tags + ["finance documentary", "money exposé", "wall street secrets", "usa finance", "uk economy"]
+    
     body={
         "snippet":{
             "title": title,
@@ -963,30 +991,37 @@ def yt_upload(path,title,desc,tags,when=None,thumb=None):
     if when: body["status"]["publishAt"]=when
     resp=svc.videos().insert(part="snippet,status",body=body,media_body=MediaFileUpload(path,mimetype="video/mp4",resumable=True)).execute()
     vid=resp["id"]
+    
     ramp=ramp_state_load()
     ramp["uploaded_count"]+=1
     ramp["scheduled_count"]+=1
     ramp_state_save(ramp)
+    
     if thumb:
         try: svc.thumbnails().set(videoId=vid,media_body=MediaFileUpload(thumb,mimetype="image/png")).execute()
         except Exception: pass
     return vid
+
 def smart_ep_when(phase,idx):
     ramp=ramp_state_load()
     base_weeks = idx // (12 if phase=="AGGRESSIVE" else 8 if phase=="SCALE" else 4 if phase=="BUILD" else 2)
+    
     if phase=="AGGRESSIVE":
         days = ["Friday","Wednesday","Monday"]
     elif phase=="SCALE":
         days = ["Friday","Tuesday"]
     else:
         days = ["Friday"]
+    
     day = days[idx % len(days)]
     return occ(day,"21:00",weeks=base_weeks)
+
 def smart_sh_when(phase,k):
     days = ["Monday","Wednesday","Friday"]
     day = days[k % len(days)]
     return occ(day,"17:00",weeks=k//3)
-    st.set_page_config(page_title="Shadow Ledger Studio",page_icon="🎬",layout="wide")
+
+st.set_page_config(page_title="Shadow Ledger Studio",page_icon="🎬",layout="wide")
 st.markdown("""<style>
  .stApp{background:radial-gradient(1200px 600px at 80% -10%,#14304f66,transparent),linear-gradient(180deg,#070d18,#0b1526 60%,#081020);}
  h1,h2,h3{color:#ffd76a !important;font-family:Georgia,serif;text-shadow:0 0 18px rgba(245,197,66,.35);}
@@ -1015,6 +1050,7 @@ st.markdown("""<style>
  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
  @keyframes glow{0%,100%{box-shadow:0 0 4px #f5c54233}50%{box-shadow:0 0 18px #f5c542aa}}
 </style>""",unsafe_allow_html=True)
+
 line=load_line()
 st.session_state.line=line
 jb=job_load()
@@ -1033,6 +1069,7 @@ pct=sum(flags.values())/len(order)
 st.title("🎬 SHADOW LEDGER — Mission Control")
 st.markdown("".join(f"<span class='chip {states[k]}'>{'✅ ' if states[k]=='done' else '⭐ ' if states[k]=='now' else '🔒 '}{labels[k]}</span>" for k in order),unsafe_allow_html=True)
 st.progress(pct,text=f"Pipeline {int(pct*100)}% complete")
+
 support=st.sidebar.text_input("☕ Support link (Ko-fi)","https://ko-fi.com/shadowledger")
 shop=st.sidebar.text_input("📄 Case File shop link (blank until open)","")
 ep_num=st.sidebar.text_input("Episode #","001")
@@ -1127,6 +1164,7 @@ angle_list=list(ANGLES)
 angle=st.sidebar.selectbox("Story angle",angle_list,index=angle_list.index(adv) if adv in angle_list else 0)
 jsave(SET_F,{"series":series,"pilot":pilot,"auto_mood":auto_mood,"mood":mood,"angle":angle,"voice":voice,"music":music_path,"support":support,"ep_day":ep_day,"ep_time":ep_time,"sh_day":sh_day,"sh_time":sh_time,"manual":manual,"interrupts":interrupts,"footage":FMAP[footage_sel],"voice_mode":("premium" if voice_mode.startswith("PREMIUM") else "free")})
 tab1,tab2,tabS,tab3,tab4=st.tabs(["🥚 1·SCAN","🏭 2·PRODUCE","💼 SPONSOR","📦 3·PUBLISH","📈 STRATEGY"])
+
 def guide(steps):
     html=""; nxt=False
     for name,done in steps:
@@ -1135,6 +1173,7 @@ def guide(steps):
         else: cls=""; lab="•"
         html+=f"<span class='gchip {cls}'>{lab} {name}</span>"
     st.markdown(html,unsafe_allow_html=True)
+
 with tab1:
     with st.expander("🧭 HOW TO USE — 2-minute tour (for anyone)",expanded=not line):
         st.markdown("""1️⃣ **SCAN** → refresh bulletin + Golden Egg scan, tick winners, add to line.
@@ -1226,6 +1265,7 @@ with tab1:
             if st.button("🎬 QUEUE SEQUEL"):
                 tt=next((m.get("topic") for v,m in jload(MET_F,{}).items() if v==hof_best()["vid"]),None)
                 if tt: queue_topic(f"Sequel to: {tt}",80,"HOF")
+
 with tab2:
     st.markdown("## 8️⃣ STEP 6 · Render (cloud background)")
     jb=job_load()
@@ -1320,6 +1360,7 @@ with tab2:
                             else: zf.writestr(n,d)
                     st.session_state[f"pz_{ep}"]=z.getvalue()
                 if st.session_state.get(f"pz_{ep}"): c3.download_button("⬇️ ZIP",st.session_state[f"pz_{ep}"],f"PACK_{ep}.zip",key=f"dz_{ep}")
+
 with tabS:
     st.markdown("## 💼 SPONSOR SUITE")
     spn=st.text_input("Sponsor name","")
@@ -1327,6 +1368,7 @@ with tabS:
     spo=st.checkbox("✅ Approved")
     if st.button("💾 SAVE SLOT"):
         if spn: jsave(SPO_F,{"name":spn,"script":sps,"place":"After cold open + title","approved":spo}); st.success("✅")
+
 with tab3:
     st.caption("Auto-upload sends episode+Shorts to YouTube. This tab builds the ZIP for TikTok/IG/FB + Case File + subtitles + metadata.")
     rendered=[i for i in line if i["status"]=="rendered" and i.get("out") and os.path.exists(i["out"])]
@@ -1348,6 +1390,7 @@ with tab3:
                 st.success("✅ Pack ready.")
             except Exception as e:
                 st.error(f"Pack hiccup: {str(e)[:120]} — try again.")
+
 with tab4:
     st.caption("Your money dashboard: revenue forecast + ramp phase + YPP readiness.")
     rf=revenue_forecast()
@@ -1357,41 +1400,52 @@ with tab4:
     real footage + original cinematic sound design (risers/booms/whooshes/drops/swells) + signature edit (letterbox, slow-mo
     reveal, black tension beats, pauses, color grade). Spend-guard caps cost. Permanent memory + recover. This is the
     channel that makes free tools look like a million dollars. 🎬""")
-    def auto_monster(months=3):
+
+def auto_monster(months=3):
     JOB=job_load(); JOB["running"]=True; job_save(JOB); vault_save_job(JOB)
     ramp=ramp_state_load()
     ramp["auto_mode"]=True
     ramp["target_eps"]=30 * months
     ramp_state_save(ramp)
-     try:
+    
+    try:
         st.info(f"🤖 Generating {ramp['target_eps']} episodes ({months} months)...")
         line=load_line()
+        
         while len(line) < ramp["target_eps"]:
             bull=refresh_bulletin(DEFAULT_SEEDS)
             top_topic = bull[0]["t"] if bull else f"Finance scandal #{len(line)+1}"
+            
             series_plan = qwen(f"Prestige documentary topic: {top_topic}. Return JSON {{'episodes':[3]}}")
             for ep_title in series_plan.get("episodes", [top_topic]):
                 if len(line) >= ramp["target_eps"]: break
                 queue_topic(ep_title, 80, "AUTO_MONSTER")
             line=load_line()
+        
         batch_worker(auto_upload=True, auto_schedule=True, auto_feed=True)
-         ramp["auto_mode"]=False
+        
+        ramp["auto_mode"]=False
         ramp_state_save(ramp)
         JOB["log"].append(f"✅ AUTO MONSTER COMPLETE: {ramp['target_eps']} episodes scheduled")
         st.success(f"🎬 {months}-MONTH CONTENT MACHINE COMPLETE!")
-         except Exception as e:
+        
+    except Exception as e:
         JOB["log"].append(f"⚠️ Auto Monster failed: {str(e)[:100]}")
         st.error(f"Monster hiccup: {str(e)[:100]}")
     finally:
         JOB["running"]=False; job_save(JOB); vault_save_job(JOB)
+
 tab1,tab2,tabS,tab3,tab4,tab5=st.tabs(["🥚 1·SCAN","🏭 2·PRODUCE","💼 SPONSOR","📦 3·PUBLISH","📈 STRATEGY","👹 AUTO MONSTER"])
+
 with tab5:
     st.markdown("## 👹 AUTO MONSTER MODE")
     st.caption("One-click 3-6 months of finance content. Generates, renders, uploads, and schedules everything.")
-     months = st.slider("📅 Months of content", 3, 6, 3)
+    
+    months = st.slider("📅 Months of content", 3, 6, 3)
     if st.button("🔥 LAUNCH AUTO MONSTER"):
         threading.Thread(target=auto_monster, args=(months,), daemon=True).start()
         st.success("👹 Monster unleashed! Check '2·PRODUCE' for live progress.")
+    
     jb=job_load()
     ramp=ramp_state_load()
     if ramp["auto_mode"]:
