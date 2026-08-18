@@ -1215,4 +1215,50 @@ with tab1:
             st.success(f"✅ Found {len(bull[:12])} hot topics")
     
     # SHOW TOPICS (ONLY IF SCANNED)
+    bull_items = st.session_state.get("bull", [])
+    if bull_items:
+        st.markdown("### 🔥 TOP WINNERS (High RPM + Trending)")
+        for i, item in enumerate(bull_items[:6]):  # Show top 6
+            score_color = "green" if item["sc"] >= 80 else "orange" if item["sc"] >= 60 else "gray"
+            st.markdown(f"**{item['t']}** · 🥚 `{item['sc']}/100` · `{item['src']}`")
+            
+            # ADD BUTTON FOR EACH TOPIC
+            if st.button(f"➕ ADD '{item['t'][:30]}...'", key=f"add_{i}"):
+                jsave(LINE_F, [])  # Clear old episodes
+                queue_topic(item["t"], item["sc"], item["src"])
+                st.session_state.line = load_line()
+                st.success(f"✅ Added '{item['t']}' — go to 🏭 2·PRODUCE")
+    
+    st.markdown("## 🧹 CLEAN SLATE TOOLS")
+    c1, c2 = st.columns(2)
+    if c1.button("🆕 NEW PROJECT (CLEAR ALL)"):
+        jsave(LINE_F, [])
+        jsave(BIBLE_F, [])
+        jsave(MET_F, [])
+        st.session_state.line = []
+        st.success("✅ Production line cleared")
+    
+    if c2.button("🔄 REFRESH FROM YOUTUBE"):
+        with st.spinner("Scanning your channel..."):
+            ups = yt_channel_uploads()
+            newl = []
+            for vid, title in ups:
+                if "shorts" not in title.lower() and "#shorts" not in title:
+                    newl.append({
+                        "topic": title,
+                        "status": "rendered",
+                        "yt_id": vid
+                    })
+            jsave(LINE_F, newl)
+            st.session_state.line = newl
+        st.success(f"✅ Restored {len(newl)} full episodes")
+    
+    # GOLDEN GOOSE BUTTON
+    if st.button("🔍 SCAN YOUTUBE FOR HOT TOPICS"):
+        with st.spinner("📡 Finding high-RPM finance topics..."):
+            bull = refresh_bulletin(DEFAULT_SEEDS)
+            st.session_state["bull"] = bull
+            st.success(f"✅ Found {len(bull[:12])} hot topics")
+    
+    # SHOW TOPICS (ONLY IF SCANNED)
    
