@@ -774,6 +774,11 @@ def render(sc,topic,series,pilot,music,voice,mood,sp=None,angle="Dark expose (de
     layers.append(ImageClip(np.zeros((bar,1280,3),dtype=np.uint8)).with_duration(final.duration).with_position((0,720-bar)))
     final=CompositeVideoClip(layers)
     L("📼 Encoding final cut",0.9)
+    # CRASH PROTECTION: ENSURE MINIMUM DURATION
+    if final.duration < 60:
+        st.warning("⚠️ Video too short! Adding filler scenes...")
+        filler = ColorClip((1280,720), color=(0,0,0), duration=60-final.duration)
+        final = concatenate_videoclips([final, filler])
     out=f"{TMP}/episode_{hashlib.md5(topic.encode()).hexdigest()}.mp4"
     final.write_videofile(out,codec="libx264",audio_codec="aac",fps=24,logger=None)
     return out,srt
@@ -1166,7 +1171,9 @@ adv=balance_advice(line)
 angle_list=list(ANGLES)
 angle=st.sidebar.selectbox("Story angle",angle_list,index=angle_list.index(adv) if adv in angle_list else 0)
 jsave(SET_F,{"series":series,"pilot":False,"auto_mood":auto_mood,"mood":mood,"angle":angle,"voice":voice,"music":music_path,"support":support,"ep_day":ep_day,"ep_time":ep_time,"sh_day":sh_day,"sh_time":sh_time,"manual":manual,"interrupts":interrupts,"footage":FMAP[footage_sel],"voice_mode":("premium" if voice_mode.startswith("PREMIUM") else "free")})
-tab1,tab2,tabS,tab3,tab4=st.tabs(["🥚 1·SCAN","🏭 2·PRODUCE","💼 SPONSOR","📦 3·PUBLISH","📈 STRATEGY"])
+
+# CRITICAL FIX: SINGLE TAB SET (NO DUPLICATES)
+tab1,tab2,tabS,tab3,tab4,tab5=st.tabs(["🥚 1·SCAN","🏭 2·PRODUCE","💼 SPONSOR","📦 3·PUBLISH","📈 STRATEGY","👹 AUTO MONSTER"])
 
 def guide(steps):
     html=""; nxt=False
@@ -1403,42 +1410,6 @@ with tab4:
     real footage + original cinematic sound design (risers/booms/whooshes/drops/swells) + signature edit (letterbox, slow-mo
     reveal, black tension beats, pauses, color grade). Spend-guard caps cost. Permanent memory + recover. This is the
     channel that makes free tools look like a million dollars. 🎬""")
-
-def auto_monster(months=3):
-    JOB=job_load(); JOB["running"]=True; job_save(JOB); vault_save_job(JOB)
-    ramp=ramp_state_load()
-    ramp["auto_mode"]=True
-    ramp["target_eps"]=30 * months
-    ramp_state_save(ramp)
-    
-    try:
-        st.info(f"🤖 Generating {ramp['target_eps']} episodes ({months} months)...")
-        line=load_line()
-        
-        while len(line) < ramp["target_eps"]:
-            bull=refresh_bulletin(DEFAULT_SEEDS)
-            top_topic = bull[0]["t"] if bull else f"Finance scandal #{len(line)+1}"
-            
-            series_plan = qwen(f"Prestige documentary topic: {top_topic}. Return JSON {{'episodes':[3]}}")
-            for ep_title in series_plan.get("episodes", [top_topic]):
-                if len(line) >= ramp["target_eps"]: break
-                queue_topic(ep_title, 80, "AUTO_MONSTER")
-            line=load_line()
-        
-        batch_worker(auto_upload=True, auto_schedule=True, auto_feed=True)
-        
-        ramp["auto_mode"]=False
-        ramp_state_save(ramp)
-        JOB["log"].append(f"✅ AUTO MONSTER COMPLETE: {ramp['target_eps']} episodes scheduled")
-        st.success(f"🎬 {months}-MONTH CONTENT MACHINE COMPLETE!")
-        
-    except Exception as e:
-        JOB["log"].append(f"⚠️ Auto Monster failed: {str(e)[:100]}")
-        st.error(f"Monster hiccup: {str(e)[:100]}")
-    finally:
-        JOB["running"]=False; job_save(JOB); vault_save_job(JOB)
-
-tab1,tab2,tabS,tab3,tab4,tab5=st.tabs(["🥚 1·SCAN","🏭 2·PRODUCE","💼 SPONSOR","📦 3·PUBLISH","📈 STRATEGY","👹 AUTO MONSTER"])
 
 with tab5:
     st.markdown("## 👹 AUTO MONSTER MODE")
