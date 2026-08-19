@@ -1216,7 +1216,7 @@ jsave(SET_F,{"series":series,"pilot":False,"auto_mood":auto_mood,"mood":mood,"an
 # SINGLE TAB SET
 tab1,tab2,tabS,tab3,tab4,tab5=st.tabs(["🥚 1·SCAN","🏭 2·PRODUCE","💼 SPONSOR","📦 3·PUBLISH","📈 STRATEGY","👹 AUTO MONSTER"])
 
-# GOLDEN GOOSE SCANNER TAB (FIXED)
+# GOLDEN GOOSE SCANNER TAB (WORKING VERSION)
 with tab1:
     st.markdown("## 🎯 STEP 1: FIND HIGH-RPM TOPICS")
     st.caption("Auto-finds trending finance topics with USA/UK audience focus")
@@ -1225,45 +1225,59 @@ with tab1:
     if "scan_triggered" not in st.session_state:
         st.session_state.scan_triggered = False
     if "rendered_topics" not in st.session_state:
-        # LOAD ALREADY RENDERED TOPICS TO AVOID DUPLICATES
         rendered = [i["topic"] for i in load_line() if i["status"]=="rendered"]
         st.session_state.rendered_topics = rendered
     
-    # TWO BUTTONS WITH UNIQUE KEYS
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("🔍 SCAN YOUTUBE FOR HOT TOPICS", key=f"scan_{uuid.uuid4().hex[:8]}"):
-            st.session_state.scan_triggered = True
-            st.session_state.bull = None
-    with col2:
-        if st.button("🎲 RANDOM FINANCE TOPIC", key=f"random_{uuid.uuid4().hex[:8]}"):
-            random_topic = f"Finance scandal #{hash(str(time.time())) % 1000}"
-            queue_topic(random_topic, 75, "RANDOM")
-            st.session_state.line = load_line()
-            st.session_state.rendered_topics.append(random_topic)
-            st.success(f"✅ Added '{random_topic}' — go to 🏭 2·PRODUCE")
+    # SCAN BUTTON
+    if st.button("🔍 SCAN YOUTUBE FOR HOT TOPICS", key=f"scan_{uuid.uuid4().hex[:8]}"):
+        st.session_state.scan_triggered = True
+        st.session_state.bull = None
+        st.session_state.scan_error = None
     
-    # SCAN EXECUTION (ONLY ONCE)
-    if st.session_state.scan_triggered and not st.session_state.get("bull"):
-        with st.spinner("📡 Finding high-RPM finance topics..."):
-            bull = refresh_bulletin(DEFAULT_SEEDS)
-            st.session_state["bull"] = bull
+    # EXECUTE SCAN
+    if st.session_state.scan_triggered:
+        try:
+            with st.spinner("📡 Finding high-RPM finance topics..."):
+                # TEST YOUTUBE API ACCESS FIRST
+                test = yt("search", part="snippet", q="finance", maxResults=1)
+                if "items" not in test:
+                    raise Exception("YouTube API not responding")
+                
+                bull = refresh_bulletin(DEFAULT_SEEDS)
+                st.session_state["bull"] = bull
+                st.session_state.scan_triggered = False
+                st.success(f"✅ Found {len(bull[:12])} hot topics")
+        except Exception as e:
             st.session_state.scan_triggered = False
-            st.success(f"✅ Found {len(bull[:12])} hot topics")
+            st.session_state.scan_error = str(e)[:100]
+            st.error(f"⚠️ Scan failed: {st.session_state.scan_error}")
+    
+    # SHOW ERROR IF ANY
+    if "scan_error" in st.session_state and st.session_state.scan_error:
+        st.warning(f"Last error: {st.session_state.scan_error}")
     
     # SHOW RESULTS
     bull_items = st.session_state.get("bull", [])
     if bull_items:
         st.markdown("### 🔥 TOP WINNERS (High RPM + Trending)")
         for i, item in enumerate(bull_items[:6]):
-            st.markdown(f"**{item['t']}** · 🥚 `{item['sc']}/100` · `{item['src']}`")
+            score_color = "🟢" if item["sc"] >= 80 else "🟡" if item["sc"] >= 60 else "🔴"
+            st.markdown(f"{score_color} **{item['t']}** · 🥚 `{item['sc']}/100` · `{item['src']}`")
+            
             if st.button(f"➕ ADD '{item['t'][:30]}...'", key=f"add_{i}_{uuid.uuid4().hex[:8]}"):
-                jsave(LINE_F, [])  # CLEAR OLD EPISODES
+                jsave(LINE_F, [])
                 queue_topic(item["t"], item["sc"], item["src"])
                 st.session_state.line = load_line()
-                # TRACK RENDERED TOPICS
                 st.session_state.rendered_topics.append(item["t"])
                 st.success(f"✅ Added '{item['t']}' — go to 🏭 2·PRODUCE")
+    
+    # RANDOM TOPIC BUTTON
+    if st.button("🎲 RANDOM FINANCE TOPIC", key=f"random_{uuid.uuid4().hex[:8]}"):
+        random_topic = f"Finance scandal #{hash(str(time.time())) % 1000}"
+        queue_topic(random_topic, 75, "RANDOM")
+        st.session_state.line = load_line()
+        st.session_state.rendered_topics.append(random_topic)
+        st.success(f"✅ Added '{random_topic}' — go to 🏭 2·PRODUCE")
     
     # CLEAN SLATE TOOLS
     st.markdown("## 🧹 CLEAN SLATE TOOLS")
@@ -1274,8 +1288,20 @@ with tab1:
             jsave(BIBLE_F, [])
             jsave(MET_F, [])
             st.session_state.line = []
-            st.session_state.rendered_topics = []  # RESET TRACKING
+            st.session_state.rendered_topics = []
             st.success("✅ Production line cleared")
+    with c2:
+        if st.button("🔄 REFRESH FROM YOUTUBE", key=f"refresh_yt_{uuid.uuid4().hex[:8]}"):
+            with st.spinner("Scanning your channel..."):
+                ups = yt_channel_uploads()
+                newl = []
+                for vid, title in ups:
+                    if "shorts" not in title.lower() and "#shorts" not in title:
+                        newl.append({"topic": title, "status": "rendered", "yt_id": vid})
+                jsave(LINE_F, newl)
+                st.session_state.line = newl
+                st.session_state.rendered_topics = [i["topic"] for i in newl]
+            st.success(f"✅ Restored {len(newl)} full episodes")
     with c2:
         if st.button("🔄 REFRESH FROM YOUTUBE", key=f"refresh_yt_{uuid.uuid4().hex[:8]}"):
             with st.spinner("Scanning your channel..."):
