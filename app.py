@@ -1302,19 +1302,7 @@ with tab1:
                 st.session_state.line = newl
                 st.session_state.rendered_topics = [i["topic"] for i in newl]
             st.success(f"✅ Restored {len(newl)} full episodes")
-    with c2:
-        if st.button("🔄 REFRESH FROM YOUTUBE", key=f"refresh_yt_{uuid.uuid4().hex[:8]}"):
-            with st.spinner("Scanning your channel..."):
-                ups = yt_channel_uploads()
-                newl = []
-                for vid, title in ups:
-                    if "shorts" not in title.lower() and "#shorts" not in title:
-                        newl.append({"topic": title, "status": "rendered", "yt_id": vid})
-                jsave(LINE_F, newl)
-                st.session_state.line = newl
-                # UPDATE RENDERED TOPICS
-                st.session_state.rendered_topics = [i["topic"] for i in newl]
-            st.success(f"✅ Restored {len(newl)} full episodes")
+  
 
 with tab2:
     st.markdown("## 8️⃣ STEP 6 · Render (cloud background)")
