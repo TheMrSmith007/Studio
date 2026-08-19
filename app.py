@@ -2,7 +2,7 @@ import warnings
 warnings.filterwarnings("ignore")
 import socket
 socket.setdefaulttimeout(20)
-import streamlit as st, requests, json, os, io, re, zipfile, hashlib, textwrap, time, base64, threading
+import streamlit as st, requests, json, os, io, re, zipfile, hashlib, textwrap, time, base64, threading, uuid
 from datetime import datetime, timedelta, date
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
@@ -65,7 +65,7 @@ def job_load(): return jload(JOB_F,{"running":False,"current":"","log":[],"live"
 def job_save(j): jsave(JOB_F,j)
 def prefs_txt():
     p=jload(PREF_F,[]); return " · ".join(p[-5:]) if p else "No CEO preferences stored yet."
-DEFAULT_SEEDS="BlackRock buying housing\nTicketmaster Live Nation monopoly\nThe janitor who left $6 million to his hospital\nHow Norway became the world's landlord\nThe teacher who out-traded Wall Street\nBoeing whistleblowers"
+DEFAULT_SEEDS="Ticketmaster Live Nation monopoly\nThe janitor who left $6 million to his hospital\nHow Norway became the world's landlord\nThe teacher who out-traded Wall Street\nBoeing whistleblowers\nCredit Suisse collapse\nPension fund raids\nHousing market crash 2026"
 def load_seeds():
     s=jload(SEEDS_F,None); return "\n".join(s) if s else DEFAULT_SEEDS
 def save_seeds(t): jsave(SEEDS_F,[x for x in t.splitlines() if x.strip()])
@@ -560,23 +560,35 @@ def predict_spikes(seed):
             sc,why=golden_egg(s); out.append((s,sc,why))
         except Exception: pass
     out.sort(key=lambda x:-x[1]); return out
+
+# CRITICAL FIX: AVOID DUPLICATES
 def refresh_bulletin(seed_text):
     themes=[x for x in seed_text.splitlines() if x.strip()][:2] or ["finance"]; items=[]
     for th in themes:
         sug,vel=trend_radar(th)
+        seen=set(st.session_state.get("rendered_topics", []))
         for s in sug[:4]:
-            try:
-                sc,why=golden_egg(s); items.append({"t":s,"sc":sc,"src":"LIVE"})
-            except Exception: pass
-        for v in vel[:2]: items.append({"t":v,"sc":0,"src":"HOT-7D"})
+            if s not in seen:
+                try:
+                    sc,why=golden_egg(s); items.append({"t":s,"sc":sc,"src":"LIVE"})
+                except Exception: pass
+        for v in vel[:2]: 
+            if v not in seen and v not in [i["t"] for i in items]:
+                items.append({"t":v,"sc":0,"src":"HOT-7D"})
     try:
-        for s,sc,why in predict_spikes(themes[0])[:5]: items.append({"t":s,"sc":sc,"src":"FORECAST"})
+        for s,sc,why in predict_spikes(themes[0])[:5]:
+            if s not in seen and s not in [i["t"] for i in items]:
+                items.append({"t":s,"sc":sc,"src":"FORECAST"})
     except Exception: pass
-    seen=set(); out=[]
+    out=[]; seen_titles=set()
     for i in items:
         k=i["t"].lower().strip()
-        if k and k not in seen: seen.add(k); out.append(i)
-    out.sort(key=lambda x:-x["sc"]); jsave(BULL_F,{"ts":datetime.now().isoformat(),"items":out[:12]}); return out[:12]
+        if k and k not in seen_titles: 
+            seen_titles.add(k); out.append(i)
+    out.sort(key=lambda x:-x["sc"]); 
+    jsave(BULL_F,{"ts":datetime.now().isoformat(),"items":out[:12]})
+    return out[:12]
+
 def series_plan(t): return qwen(f"Prestige documentary topic: {t}. Return JSON {{'series':bool,'why':'','episodes':[2-3 distinct titles]}}")
 def quality_gate(topic,sc): 
     g=qwen(GATE.format(topic=topic,script=json.dumps(sc)))
@@ -1144,22 +1156,24 @@ with st.sidebar.expander("💳 CREDIT & RAMP CONSOLE",expanded=True):
     ra=ramp_advisor(); st.caption(f"Phase **{ra['phase']}** · {ra['rec']}")
 with st.sidebar.expander("🧑✈️ CEO's Pilot"):
     pmsg=st.text_input("Your order, CEO")
-    if st.button("📨 Send to Pilot"):
+    if st.button("📨 Send to Pilot", key=f"ceo_pilot_{uuid.uuid4().hex[:8]}"):
         if pmsg.strip():
             reply,outs=ceo_pilot(pmsg); st.success(reply)
             for o in outs: st.caption(o)
 with st.sidebar.expander("🔑 Connect + Vault (on-demand)"):
     if YTC_ID and YTC_SEC: st.success("Secrets detected ✅")
     else: st.warning("Secrets must be YOUTUBE_CLIENT_ID + YOUTUBE_CLIENT_SECRET (all caps).")
-    if st.button("1️⃣ Connect (YouTube + Vault)"): st.code(yt_auth_url(FULLSCOPE))
-    if st.button("1️⃣ Connect (YouTube only)"): st.code(yt_auth_url(YT_ONLY))
-    code=st.text_input("2️⃣ Paste the code")
-    if code and st.button("🔗 Connect"):
+    if st.button("1️⃣ Connect (YouTube + Vault)", key=f"connect_yt_vault_{uuid.uuid4().hex[:8]}"):
+        st.code(yt_auth_url(FULLSCOPE))
+    if st.button("1️⃣ Connect (YouTube only)", key=f"connect_yt_only_{uuid.uuid4().hex[:8]}"):
+        st.code(yt_auth_url(YT_ONLY))
+    code=st.text_input("2️⃣ Paste the code", key=f"oauth_code_{uuid.uuid4().hex[:8]}")
+    if code and st.button("🔗 Connect", key=f"connect_oauth_{uuid.uuid4().hex[:8]}"):
         try:
             rt=yt_connect(code.strip()); st.success("Connected ✅")
             if rt: st.code(f'YT_REFRESH_TOKEN = "{rt}"')
         except Exception as e: st.error(str(e)[:120])
-    if st.button("🔄 Recover / rebuild from YouTube"):
+    if st.button("🔄 Recover / rebuild from YouTube", key=f"recover_yt_{uuid.uuid4().hex[:8]}"):
         with st.spinner("🔄 Scanning your channel…"):
             ups=yt_channel_uploads(); cur=load_line(); hits=0
             if not cur:
@@ -1176,14 +1190,14 @@ with st.sidebar.expander("🔑 Connect + Vault (on-demand)"):
                                 it["yt_id"]=vid; it["status"]="rendered"; hits+=1; break
             save_line(cur); st.session_state.line=cur
         st.success(f"✅ Recovered {hits} episode(s) from YouTube.")
-    if st.button("🆕 NEW PROJECT"):
-        jsave(LINE_F,[]); vault_save([]); st.session_state.line=[]; st.success("✅ New project started.")
-    if st.button("☁️ Backup line to Vault"):
+    if st.button("🆕 NEW PROJECT", key=f"new_project_{uuid.uuid4().hex[:8]}"):
+        jsave(LINE_F,[]); vault_save([]); st.session_state.line=[]; st.session_state.rendered_topics=[]; st.success("✅ New project started.")
+    if st.button("☁️ Backup line to Vault", key=f"backup_vault_{uuid.uuid4().hex[:8]}"):
         with st.spinner("☁️ Backing up…"): vault_save(load_line()); st.success("✅ Backed up.")
-    if st.button("⬇️ Restore line from Vault"):
+    if st.button("⬇️ Restore line from Vault", key=f"restore_vault_{uuid.uuid4().hex[:8]}"):
         with st.spinner("⬇️ Restoring…"):
             r=vault_load()
-            if r: jsave(LINE_F,r); st.session_state.line=r; st.success(f"✅ Restored {len(r)} episode(s).")
+            if r: jsave(LINE_F,r); st.session_state.line=r; st.session_state.rendered_topics=[i["topic"] for i in r if i["status"]=="rendered"]; st.success(f"✅ Restored {len(r)} episode(s).")
             else: st.warning("No Vault backup found.")
 with st.sidebar.expander("📈 RAMP DASHBOARD",expanded=True):
     ramp=ramp_state_load()
@@ -1202,159 +1216,266 @@ jsave(SET_F,{"series":series,"pilot":False,"auto_mood":auto_mood,"mood":mood,"an
 # SINGLE TAB SET
 tab1,tab2,tabS,tab3,tab4,tab5=st.tabs(["🥚 1·SCAN","🏭 2·PRODUCE","💼 SPONSOR","📦 3·PUBLISH","📈 STRATEGY","👹 AUTO MONSTER"])
 
-# GOLDEN GOOSE SCANNER TAB
+# GOLDEN GOOSE SCANNER TAB (FIXED)
 with tab1:
     st.markdown("## 🎯 STEP 1: FIND HIGH-RPM TOPICS")
     st.caption("Auto-finds trending finance topics with USA/UK audience focus")
     
-    # INITIALIZE SCAN STATE
+    # INITIALIZE STATES
     if "scan_triggered" not in st.session_state:
         st.session_state.scan_triggered = False
+    if "rendered_topics" not in st.session_state:
+        # LOAD ALREADY RENDERED TOPICS TO AVOID DUPLICATES
+        rendered = [i["topic"] for i in load_line() if i["status"]=="rendered"]
+        st.session_state.rendered_topics = rendered
     
-    # SCAN BUTTON (UNIQUE KEY + STATE CONTROL)
-    if st.button("🔍 SCAN YOUTUBE FOR HOT TOPICS", key="unique_scan_button"):
-        st.session_state.scan_triggered = True
-        st.session_state.bull = None  # Clear previous results
+    # TWO BUTTONS WITH UNIQUE KEYS
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🔍 SCAN YOUTUBE FOR HOT TOPICS", key=f"scan_{uuid.uuid4().hex[:8]}"):
+            st.session_state.scan_triggered = True
+            st.session_state.bull = None
+    with col2:
+        if st.button("🎲 RANDOM FINANCE TOPIC", key=f"random_{uuid.uuid4().hex[:8]}"):
+            random_topic = f"Finance scandal #{hash(str(time.time())) % 1000}"
+            queue_topic(random_topic, 75, "RANDOM")
+            st.session_state.line = load_line()
+            st.session_state.rendered_topics.append(random_topic)
+            st.success(f"✅ Added '{random_topic}' — go to 🏭 2·PRODUCE")
     
-    # EXECUTE SCAN ONLY ONCE PER CLICK
+    # SCAN EXECUTION (ONLY ONCE)
     if st.session_state.scan_triggered and not st.session_state.get("bull"):
         with st.spinner("📡 Finding high-RPM finance topics..."):
             bull = refresh_bulletin(DEFAULT_SEEDS)
             st.session_state["bull"] = bull
-            st.session_state.scan_triggered = False  # Reset trigger
+            st.session_state.scan_triggered = False
             st.success(f"✅ Found {len(bull[:12])} hot topics")
     
-    # SHOW TOPICS (ONLY IF SCANNED)
+    # SHOW RESULTS
     bull_items = st.session_state.get("bull", [])
     if bull_items:
         st.markdown("### 🔥 TOP WINNERS (High RPM + Trending)")
-        for i, item in enumerate(bull_items[:6]):  # Show top 6
-            score_color = "green" if item["sc"] >= 80 else "orange" if item["sc"] >= 60 else "gray"
+        for i, item in enumerate(bull_items[:6]):
             st.markdown(f"**{item['t']}** · 🥚 `{item['sc']}/100` · `{item['src']}`")
-            
-            # ADD BUTTON FOR EACH TOPIC (UNIQUE KEY WITH TIMESTAMP)
-            topic_key = f"add_{i}_{abs(hash(item['t'])) % 100000}"
-            if st.button(f"➕ ADD '{item['t'][:30]}...'", key=topic_key):
-                jsave(LINE_F, [])  # Clear old episodes
+            if st.button(f"➕ ADD '{item['t'][:30]}...'", key=f"add_{i}_{uuid.uuid4().hex[:8]}"):
+                jsave(LINE_F, [])  # CLEAR OLD EPISODES
                 queue_topic(item["t"], item["sc"], item["src"])
                 st.session_state.line = load_line()
+                # TRACK RENDERED TOPICS
+                st.session_state.rendered_topics.append(item["t"])
                 st.success(f"✅ Added '{item['t']}' — go to 🏭 2·PRODUCE")
     
+    # CLEAN SLATE TOOLS
     st.markdown("## 🧹 CLEAN SLATE TOOLS")
     c1, c2 = st.columns(2)
-    if c1.button("🆕 NEW PROJECT (CLEAR ALL)", key="new_project_clear_all"):
-        jsave(LINE_F, [])
-        jsave(BIBLE_F, [])
-        jsave(MET_F, [])
-        st.session_state.line = []
-        st.success("✅ Production line cleared")
+    with c1:
+        if st.button("🆕 NEW PROJECT (CLEAR ALL)", key=f"new_project_clear_{uuid.uuid4().hex[:8]}"):
+            jsave(LINE_F, [])
+            jsave(BIBLE_F, [])
+            jsave(MET_F, [])
+            st.session_state.line = []
+            st.session_state.rendered_topics = []  # RESET TRACKING
+            st.success("✅ Production line cleared")
+    with c2:
+        if st.button("🔄 REFRESH FROM YOUTUBE", key=f"refresh_yt_{uuid.uuid4().hex[:8]}"):
+            with st.spinner("Scanning your channel..."):
+                ups = yt_channel_uploads()
+                newl = []
+                for vid, title in ups:
+                    if "shorts" not in title.lower() and "#shorts" not in title:
+                        newl.append({"topic": title, "status": "rendered", "yt_id": vid})
+                jsave(LINE_F, newl)
+                st.session_state.line = newl
+                # UPDATE RENDERED TOPICS
+                st.session_state.rendered_topics = [i["topic"] for i in newl]
+            st.success(f"✅ Restored {len(newl)} full episodes")
+
+with tab2:
+    st.markdown("## 8️⃣ STEP 6 · Render (cloud background)")
+    jb=job_load()
+    if jb.get("live"):
+        lv=jb["live"]; st.info(f"🟢 LIVE: EP {lv['ep']} {lv['topic']} — {lv['stage']} ({int(lv['pct']*100)}%)")
+        st.progress(lv["pct"])
+    for ln in jb["log"][-6:]: st.caption(ln)
+    st.button("🔄 REFRESH STATUS")
+    cA,cB=st.columns(2)
+    if cA.button("8️⃣ RENDER NEXT (background)"):
+        if not job_load()["running"]:
+            nx=next((x for x in line if x["status"]=="approved"),None)
+            if nx: threading.Thread(target=batch_worker,args=([nx["topic"]],auto_upload,auto_schedule,auto_feed),daemon=True).start(); st.success("☁️ Started.")
+    if cB.button("8️⃣ RENDER ENTIRE LINE"):
+        if not job_load()["running"]:
+            threading.Thread(target=batch_worker,args=(None,auto_upload,auto_schedule,auto_feed),daemon=True).start(); st.success("☁️ Batch started.")
+    if not jb["running"] and any(x["status"] in ("queued","approved","scripted") for x in line):
+        if st.button("▶️ RESUME UNFINISHED BATCH"):
+            threading.Thread(target=batch_worker,args=(None,auto_upload,auto_schedule,auto_feed),daemon=True).start(); st.success("☁️ Resumed.")
+    st.markdown("<div class='section'>📺 LIVE OPS + 🗂 HISTORY (permanent via Vault)</div>",unsafe_allow_html=True)
+    jl=job_load()
+    if jl.get("live"): st.markdown(f"<div class='card winner'>🔴 NOW: EP {jl['live']['ep']} {jl['live']['topic']} — {jl['live']['stage']} ({int(jl['live']['pct']*100)}%)</div>",unsafe_allow_html=True)
+    for i,it in enumerate([x for x in line if x["status"] in ("queued","approved","scripted")]):
+        st.markdown(f"<div class='card'>⏳ EP {line.index(it)+1} {it['topic']} — {it['status']}</div>",unsafe_allow_html=True)
+    for hrec in jl.get("history",[])[:10]:
+        st.markdown(f"<div class='card'>{'✅' if hrec['status']=='completed' else '⚠️'} EP {hrec['ep']} {hrec['topic']} — {hrec['status']} · {hrec['took']}</div>",unsafe_allow_html=True)
+    st.markdown("## 📋 Production Line")
+    if line:
+        for i,it in enumerate(line):
+            st.markdown(f"<div class='card'>EP {i+1} · <b>{it['topic']}</b> — <code>{it['status']}</code></div>",unsafe_allow_html=True)
+    else:
+        st.info("Line is empty — do 🥚 1·SCAN, or use sidebar → Recover/Restore to bring back your work.")
+    st.markdown("## 5️⃣ STEP 3 · Series potential")
+    if st.button("5️⃣ CHECK SERIES"):
+        if line:
+            try: st.session_state.splan=series_plan(line[0]["topic"])
+            except Exception as e: st.error(f"Series check hiccup: {str(e)[:100]}")
+        else: st.warning("⬅️ Add topics first in 🥚 1·SCAN.")
+    if st.session_state.get("splan"):
+        spn=st.session_state.splan
+        st.markdown(f"**Verdict:** {'✅ series' if spn.get('series') else '❌ standalone'} — {spn.get('why','')}")
+        st.markdown("<div class='section'>📚 SERIES BIBLE — episode plan</div>",unsafe_allow_html=True)
+        for i,e in enumerate(spn.get("episodes",[])):
+            scr=next((x for x in line if x["topic"]==e and x.get("script")),None)
+            prev=scr["script"]["scenes"][0]["narration"][:120] if scr else "script pending…"
+            st.markdown(f"<div class='card'><b>EP {i+1} · {e}</b><br/><span style='color:#9fb3d1'>{prev}…</span></div>",unsafe_allow_html=True)
+        st.markdown("<div class='section'>📱 SHORTS PLAN — hooks & prompts</div>",unsafe_allow_html=True)
+        for i,e in enumerate(spn.get("episodes",[])):
+            st.markdown(f"<div class='card'><b>EP{i+1} Shorts:</b> 1) “{e} — the truth” 2) cold-open hook + bass drop 3) reveal teaser → end card “FULL FILM ON YOUTUBE”</div>",unsafe_allow_html=True)
+        if spn.get("series") and st.button("➕ ADD SERIES"):
+            base_sc=(line[0].get("score",60) if line else 60)
+            for e in spn.get("episodes",[]): queue_topic(e,base_sc,"SERIES")
+            st.session_state.series_checked=True
+            st.session_state.line=load_line()
+            st.success("✅ Series added to line.")
+    if flags["series"]:
+        st.markdown("## 6️⃣ STEP 4 · Script + Gate")
+        if any(i["status"]=="queued" for i in line):
+            if st.button("6️⃣ WRITE SCRIPT + GATE"):
+                it=next(x for x in line if x["status"]=="queued")
+                it["angle"]=it.get("angle") or angle
+                it["script"],g=script_with_floor(it["topic"],series,it["angle"]); it["gate"]=g
+                it["status"]="scripted"; save_line(line)
+                st.session_state.edits={i2:(s["narration"],s["visual"]) for i2,s in enumerate(it["script"]["scenes"])}
+                st.success("✅ Scripted + gated.")
+    cur=next((x for x in line if x["status"]=="scripted"),None)
+    if cur:
+        st.markdown("## 7️⃣ STEP 5 · Approve")
+        if st.button("🎬 COLD-OPEN A/B PREVIEWS"):
+            st.session_state[f"cp_{line.index(cur)}"]=render_cold_open_preview(cur["script"],voice,mood,line.index(cur))
+        for tag,p,txt in st.session_state.get(f"cp_{line.index(cur)}",[]):
+            st.video(p); st.caption(f"**{tag}:** {txt}")
+        if st.button("7️⃣ APPROVE → UNLOCK RENDER"):
+            cur["status"]="approved"; save_line(line); bible_append(line.index(cur)+1,cur["topic"],cur["script"])
+            st.success("✅ Approved.")
+    rendered=[i for i in line if i["status"]=="rendered" and (os.path.exists(i.get("out") or "") or i.get("yt_id"))]
+    if rendered:
+        st.markdown("### 📥 Downloads + ☁️ Uploads + ▶️ Watch")
+        for i2,it in enumerate(rendered):
+            ep=f"{int(ep_num)+i2:03d}"; sl=slug(it["topic"])
+            if it.get("out") and os.path.exists(it["out"]): st.video(it["out"])
+            if it.get("yt_id"): st.markdown(f"[▶️ **Watch on YouTube**](https://www.youtube.com/watch?v={it['yt_id']})")
+            c1,c2,c3=st.columns(3)
+            if it.get("out") and os.path.exists(it["out"]):
+                c1.download_button("⬇️ MP4",open(it["out"],"rb").read(),f"EPISODE_{ep}_{sl}.mp4",key=f"dl_{ep}")
+                if c2.button(f"📦 PACK {ep}",key=f"pk_{ep}"):
+                    entries,safe,extra=pack_entries(it,ep,support,shop,series)
+                    z=io.BytesIO()
+                    with zipfile.ZipFile(z,"w") as zf:
+                        for n,d,ip in entries:
+                            if ip: zf.write(d,n)
+                            else: zf.writestr(n,d)
+                    st.session_state[f"pz_{ep}"]=z.getvalue()
+                if st.session_state.get(f"pz_{ep}"): c3.download_button("⬇️ ZIP",st.session_state[f"pz_{ep}"],f"PACK_{ep}.zip",key=f"dz_{ep}")
+
+with tabS:
+    st.markdown("## 💼 SPONSOR SUITE")
+    spn=st.text_input("Sponsor name","")
+    sps=st.text_area("Ad read script","")
+    spo=st.checkbox("✅ Approved")
+    if st.button("💾 SAVE SLOT"):
+        if spn: jsave(SPO_F,{"name":spn,"script":sps,"place":"After cold open + title","approved":spo}); st.success("✅")
+
+with tab3:
+    st.caption("Auto-upload sends episode+Shorts to YouTube. This tab builds the ZIP for TikTok/IG/FB + Case File + subtitles + metadata.")
+    rendered=[i for i in line if i["status"]=="rendered" and i.get("out") and os.path.exists(i["out"])]
+    if not rendered: st.warning("⬅️ Render first, or use sidebar → 'Recover / rebuild from YouTube' to relink uploaded episodes.")
+    else:
+        ch=st.selectbox("Episode to pack",[i["topic"] for i in rendered])
+        it=rendered[[i["topic"] for i in rendered].index(ch)]
+        if it.get("yt_id"): st.markdown(f"[▶️ **Watch on YouTube**](https://www.youtube.com/watch?v={it['yt_id']})")
+        if st.button("📦 BUILD PUBLISH PACK"):
+            try:
+                entries,safe,extra=pack_entries(it,ep_num,support,shop,series)
+                z=io.BytesIO()
+                with zipfile.ZipFile(z,"w") as zf:
+                    for n,d,ip in entries:
+                        if ip: zf.write(d,n)
+                        else: zf.writestr(n,d)
+                st.session_state.packed=True
+                st.download_button("📦 DOWNLOAD PACK",z.getvalue(),f"SHADOW_LEDGER_PACK_{ep_num}.zip")
+                st.success("✅ Pack ready.")
+            except Exception as e:
+                st.error(f"Pack hiccup: {str(e)[:120]} — try again.")
+
+with tab4:
+    st.caption("Your money dashboard: revenue forecast + ramp phase + YPP readiness.")
+    rf=revenue_forecast()
+    st.markdown(f"**Projected:** ${rf['usd']:.0f}/mo ≈ R{rf['zar']:.0f} · Subs ~{rf['subs']} · {'✅ YPP-ready' if rf['yt_ready'] else '⏳ building'}")
+    if rf["target"]: st.success("🏆 R100k/month TARGET REACHED")
+    st.markdown("""**v53 — FREE-TOOLS, MASTERFUL ART.** Google WaveNet voice (free premium) + Gemini/Groq free scripts + Pexels/Pixabay
+    real footage + original cinematic sound design (risers/booms/whooshes/drops/swells) + signature edit (letterbox, slow-mo
+    reveal, black tension beats, pauses, color grade). Spend-guard caps cost. Permanent memory + recover. This is the
+    channel that makes free tools look like a million dollars. 🎬""")
+
+def auto_monster(months=3):
+    JOB=job_load(); JOB["running"]=True; job_save(JOB); vault_save_job(JOB)
+    ramp=ramp_state_load()
+    ramp["auto_mode"]=True
+    ramp["target_eps"]=30 * months
+    ramp_state_save(ramp)
     
-    if c2.button("🔄 REFRESH FROM YOUTUBE", key="refresh_youtube_channel"):
-        with st.spinner("Scanning your channel..."):
-            ups = yt_channel_uploads()
-            newl = []
-            for vid, title in ups:
-                if "shorts" not in title.lower() and "#shorts" not in title:
-                    newl.append({
-                        "topic": title,
-                        "status": "rendered",
-                        "yt_id": vid
-                    })
-            jsave(LINE_F, newl)
-            st.session_state.line = newl
-        st.success(f"✅ Restored {len(newl)} full episodes")
-    
-    st.markdown("## 🧹 CLEAN SLATE TOOLS")
-    c1, c2 = st.columns(2)
-    if c1.button("🆕 NEW PROJECT (CLEAR ALL)", key="new_project_clear"):
-        jsave(LINE_F, [])
-        jsave(BIBLE_F, [])
-        jsave(MET_F, [])
-        st.session_state.line = []
-        st.success("✅ Production line cleared")
-    
-    if c2.button("🔄 REFRESH FROM YOUTUBE", key="refresh_youtube_data"):
-        with st.spinner("Scanning your channel..."):
-            ups = yt_channel_uploads()
-            newl = []
-            for vid, title in ups:
-                if "shorts" not in title.lower() and "#shorts" not in title:
-                    newl.append({
-                        "topic": title,
-                        "status": "rendered",
-                        "yt_id": vid
-                    })
-            jsave(LINE_F, newl)
-            st.session_state.line = newl
-        st.success(f"✅ Restored {len(newl)} full episodes")
-    
-    if c2.button("🔄 REFRESH FROM YOUTUBE", key="refresh_yt"):
-        with st.spinner("Scanning your channel..."):
-            ups = yt_channel_uploads()
-            newl = []
-            for vid, title in ups:
-                if "shorts" not in title.lower() and "#shorts" not in title:
-                    newl.append({
-                        "topic": title,
-                        "status": "rendered",
-                        "yt_id": vid
-                    })
-            jsave(LINE_F, newl)
-            st.session_state.line = newl
-        st.success(f"✅ Restored {len(newl)} full episodes")
-    
-    # GOLDEN GOOSE BUTTON
-    if st.button("🔍 SCAN YOUTUBE FOR HOT TOPICS"):
-        with st.spinner("📡 Finding high-RPM finance topics..."):
-            bull = refresh_bulletin(DEFAULT_SEEDS)
-            st.session_state["bull"] = bull
-            st.success(f"✅ Found {len(bull[:12])} hot topics")
-    
-    # SHOW TOPICS (ONLY IF SCANNED)
-    bull_items = st.session_state.get("bull", [])
-    if bull_items:
-        st.markdown("### 🔥 TOP WINNERS (High RPM + Trending)")
-        for i, item in enumerate(bull_items[:6]):  # Show top 6
-            score_color = "green" if item["sc"] >= 80 else "orange" if item["sc"] >= 60 else "gray"
-            st.markdown(f"**{item['t']}** · 🥚 `{item['sc']}/100` · `{item['src']}`")
+    try:
+        st.info(f"🤖 Generating {ramp['target_eps']} episodes ({months} months)...")
+        line=load_line()
+        
+        # AUTO-MODE USES GOLDEN GOOSE SCANNER
+        while len(line) < ramp["target_eps"]:
+            bull=refresh_bulletin(DEFAULT_SEEDS)
+            top_topic = bull[0]["t"] if bull else f"Finance scandal #{len(line)+1}"
             
-            # ADD BUTTON FOR EACH TOPIC
-            if st.button(f"➕ ADD '{item['t'][:30]}...'", key=f"add_{i}"):
-                jsave(LINE_F, [])  # Clear old episodes
-                queue_topic(item["t"], item["sc"], item["src"])
-                st.session_state.line = load_line()
-                st.success(f"✅ Added '{item['t']}' — go to 🏭 2·PRODUCE")
+            series_plan = qwen(f"Prestige documentary topic: {top_topic}. Return JSON {{'episodes':[3]}}")
+            for ep_title in series_plan.get("episodes", [top_topic]):
+                if len(line) >= ramp["target_eps"]: break
+                queue_topic(ep_title, 80, "AUTO_MONSTER")
+            line=load_line()
+        
+        batch_worker(auto_upload=True, auto_schedule=True, auto_feed=True)
+        
+        ramp["auto_mode"]=False
+        ramp_state_save(ramp)
+        JOB["log"].append(f"✅ AUTO MONSTER COMPLETE: {ramp['target_eps']} episodes scheduled")
+        st.success(f"🎬 {months}-MONTH CONTENT MACHINE COMPLETE!")
+        
+    except Exception as e:
+        JOB["log"].append(f"⚠️ Auto Monster failed: {str(e)[:100]}")
+        st.error(f"Monster hiccup: {str(e)[:100]}")
+    finally:
+        JOB["running"]=False; job_save(JOB); vault_save_job(JOB)
+
+with tab5:
+    st.markdown("## 👹 AUTO MONSTER MODE")
+    st.caption("One-click 3-6 months of finance content. Generates, renders, uploads, and schedules everything.")
     
-    st.markdown("## 🧹 CLEAN SLATE TOOLS")
-    c1, c2 = st.columns(2)
-    if c1.button("🆕 NEW PROJECT (CLEAR ALL)"):
-        jsave(LINE_F, [])
-        jsave(BIBLE_F, [])
-        jsave(MET_F, [])
-        st.session_state.line = []
-        st.success("✅ Production line cleared")
+    months = st.slider("📅 Months of content", 3, 6, 3)
+    if st.button("🔥 LAUNCH AUTO MONSTER"):
+        threading.Thread(target=auto_monster, args=(months,), daemon=True).start()
+        st.success("👹 Monster unleashed! Check '2·PRODUCE' for live progress.")
     
-    if c2.button("🔄 REFRESH FROM YOUTUBE"):
-        with st.spinner("Scanning your channel..."):
-            ups = yt_channel_uploads()
-            newl = []
-            for vid, title in ups:
-                if "shorts" not in title.lower() and "#shorts" not in title:
-                    newl.append({
-                        "topic": title,
-                        "status": "rendered",
-                        "yt_id": vid
-                    })
-            jsave(LINE_F, newl)
-            st.session_state.line = newl
-        st.success(f"✅ Restored {len(newl)} full episodes")
+    jb=job_load()
+    ramp=ramp_state_load()
+    if ramp["auto_mode"]:
+        st.info(f"🟢 MONSTER ACTIVE: {ramp['uploaded_count']}/{ramp['target_eps']} uploaded")
+        st.progress(ramp["uploaded_count"]/ramp["target_eps"])
     
-    # GOLDEN GOOSE BUTTON
-    if st.button("🔍 SCAN YOUTUBE FOR HOT TOPICS"):
-        with st.spinner("📡 Finding high-RPM finance topics..."):
-            bull = refresh_bulletin(DEFAULT_SEEDS)
-            st.session_state["bull"] = bull
-            st.success(f"✅ Found {len(bull[:12])} hot topics")
-    
-    # SHOW TOPICS (ONLY IF SCANNED)
-   
+    if st.button("⏹️ STOP AUTO MONSTER"):
+        ramp["auto_mode"]=False
+        ramp_state_save(ramp)
+        st.success("Monster paused. Manual mode restored.")
