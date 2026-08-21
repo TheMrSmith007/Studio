@@ -664,6 +664,25 @@ def write_script(topic, series, angle, bible="", prefs=""):
     else:
         return gemini(base_prompt)  # Free tier uses Gemini
 
+# FIXED REVENUE FORECAST
+def revenue_forecast():
+    # Ensure files exist
+    rev=jload(REV_F,{"kofi_tips":[],"case_files":[]})
+    line=load_line()
+    r=len([i for i in line if i["status"]=="rendered"])
+    mk=sum(t.get("amount",0) for t in rev.get("kofi_tips",[]))*4
+    mc=sum(t.get("amount",0) for t in rev.get("case_files",[]))*4
+    my=r*150 if (r*80>=1000 and r*40>=4000) else 0
+    tot=mk+mc+my
+    return {
+        "subs":r*80,
+        "hrs":r*40,
+        "yt_ready":(r*80>=1000 and r*40>=4000),
+        "usd":tot,
+        "zar":tot*18.5,
+        "target":tot*18.5>=100000
+    }
+
 st.set_page_config(page_title="Shadow Ledger Studio",page_icon="🎬",layout="wide")
 st.markdown("""<style>
  .stApp{background:radial-gradient(1200px 600px at 80% -10%,#14304f66,transparent),linear-gradient(180deg,#070d18,#0b1526 60%,#081020);}
@@ -734,7 +753,7 @@ with st.sidebar:
         tier_map = {"Free": "free", "App Plus": "app_plus", "App Pro": "app_pro"}
         new_tier = tier_map[selected_tier]
         jsave(SET_F, {"tier": new_tier})
-        st.experimental_rerun()
+        st.rerun()  # FIXED: Use st.rerun() instead of st.experimental_rerun()
     
     # COST DISPLAY
     if selected_tier != "Free":
@@ -1047,7 +1066,7 @@ with tab3:
 
 with tab4:
     st.caption("Your money dashboard: revenue forecast + ramp phase + YPP readiness.")
-    rf=revenue_forecast()
+    rf=revenue_forecast()  # NOW WORKS WITHOUT ERRORS
     st.markdown(f"**Projected:** ${rf['usd']:.0f}/mo ≈ R{rf['zar']:.0f} · Subs ~{rf['subs']} · {'✅ YPP-ready' if rf['yt_ready'] else '⏳ building'}")
     if rf["target"]: st.success("🏆 R100k/month TARGET REACHED")
     st.markdown("""**v53 — FREE-TOOLS, MASTERFUL ART.** Google WaveNet voice (free premium) + Gemini/Groq free scripts + Pexels/Pixabay
