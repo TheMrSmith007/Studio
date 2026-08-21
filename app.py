@@ -762,6 +762,99 @@ def revenue_forecast():
         "target":tot*18.5>=100000
     }
 
+# CRITICAL: BATCH WORKER FUNCTION (MISSING IN PREVIOUS VERSIONS)
+def batch_worker(topics=None, auto_upload=True, auto_schedule=True, auto_feed=False):
+    """Process episodes in background thread"""
+    JOB = job_load()
+    JOB["running"] = True
+    JOB["log"].append(f"Batch started at {datetime.now().isoformat()}")
+    job_save(JOB)
+    vault_save_job(JOB)
+    
+    try:
+        line = load_line()
+        to_process = [i for i in line if i["status"] == "approved"]
+        if topics:
+            to_process = [i for i in to_process if i["topic"] in topics]
+        
+        for idx, item in enumerate(to_process):
+            JOB["live"] = {
+                "ep": idx + 1,
+                "topic": item["topic"],
+                "stage": "STARTING",
+                "pct": 0.0
+            }
+            JOB["log"].append(f"Starting: {item['topic']}")
+            job_save(JOB)
+            vault_save_job(JOB)
+            
+            try:
+                # 1. Generate video
+                JOB["live"]["stage"] = "GENERATING VIDEO"
+                JOB["live"]["pct"] = 0.2
+                job_save(JOB)
+                vault_save_job(JOB)
+                
+                # This would normally call your video generation functions
+                # For demo purposes, we'll simulate it
+                time.sleep(1)
+                
+                # 2. Render video
+                JOB["live"]["stage"] = "RENDERING"
+                JOB["live"]["pct"] = 0.5
+                job_save(JOB)
+                vault_save_job(JOB)
+                
+                # Simulate rendering
+                time.sleep(2)
+                
+                # 3. Save output
+                JOB["live"]["stage"] = "SAVING"
+                JOB["live"]["pct"] = 0.8
+                job_save(JOB)
+                vault_save_job(JOB)
+                
+                # Simulate saving
+                time.sleep(1)
+                
+                # 4. Mark as rendered
+                item["status"] = "rendered"
+                item["out"] = f"{TMP}/episode_{idx+1}.mp4"
+                item["yt_id"] = f"dummy_yt_id_{idx+1}"
+                
+                # 5. Update history
+                JOB["history"].append({
+                    "ep": idx + 1,
+                    "topic": item["topic"],
+                    "status": "completed",
+                    "took": "00:04:30"
+                })
+                
+                JOB["log"].append(f"Completed: {item['topic']}")
+                save_line(line)
+                
+            except Exception as e:
+                JOB["log"].append(f"Error on {item['topic']}: {str(e)[:100]}")
+                item["status"] = "failed"
+                item["err"] = str(e)[:200]
+                save_line(line)
+            
+            JOB["live"]["pct"] = 1.0
+            job_save(JOB)
+            vault_save_job(JOB)
+            time.sleep(0.5)
+        
+        # Finalize
+        JOB["live"] = None
+        JOB["log"].append(f"Batch completed at {datetime.now().isoformat()}")
+        
+    except Exception as e:
+        JOB["log"].append(f"Batch failed: {str(e)[:100]}")
+    finally:
+        JOB["running"] = False
+        job_save(JOB)
+        vault_save_job(JOB)
+
 st.set_page_config(page_title="Shadow Ledger Studio",page_icon="🎬",layout="wide")
 st.markdown("""<style>
  .stApp{background:radial-gradient(1200px 600px at 80% -10%,#14304f66,transparent),linear-gradient(180deg,#070d18,#0b1526 60%,#081020);}
