@@ -753,7 +753,7 @@ with st.sidebar:
         tier_map = {"Free": "free", "App Plus": "app_plus", "App Pro": "app_pro"}
         new_tier = tier_map[selected_tier]
         jsave(SET_F, {"tier": new_tier})
-        st.rerun()  # FIXED: Use st.rerun() instead of st.experimental_rerun()
+        st.rerun()
     
     # COST DISPLAY
     if selected_tier != "Free":
@@ -804,24 +804,24 @@ with st.sidebar:
         ra=ramp_advisor(); st.caption(f"Phase **{ra['phase']}** · {ra['rec']}")
     with st.sidebar.expander("🧑✈️ CEO's Pilot"):
         pmsg=st.text_input("Your order, CEO")
-        if st.button("📨 Send to Pilot", key=f"ceo_pilot_{uuid.uuid4().hex[:8]}"):
+        if st.button("📨 Send to Pilot", key="ceo_pilot_button"):
             if pmsg.strip():
                 reply,outs=ceo_pilot(pmsg); st.success(reply)
                 for o in outs: st.caption(o)
     with st.sidebar.expander("🔑 Connect + Vault (on-demand)"):
         if YTC_ID and YTC_SEC: st.success("Secrets detected ✅")
         else: st.warning("Secrets must be YOUTUBE_CLIENT_ID + YOUTUBE_CLIENT_SECRET (all caps).")
-        if st.button("1️⃣ Connect (YouTube + Vault)", key=f"connect_yt_vault_{uuid.uuid4().hex[:8]}"):
+        if st.button("1️⃣ Connect (YouTube + Vault)", key="connect_yt_vault"):
             st.code(yt_auth_url(FULLSCOPE))
-        if st.button("1️⃣ Connect (YouTube only)", key=f"connect_yt_only_{uuid.uuid4().hex[:8]}"):
+        if st.button("1️⃣ Connect (YouTube only)", key="connect_yt_only"):
             st.code(yt_auth_url(YT_ONLY))
-        code=st.text_input("2️⃣ Paste the code", key=f"oauth_code_{uuid.uuid4().hex[:8]}")
-        if code and st.button("🔗 Connect", key=f"connect_oauth_{uuid.uuid4().hex[:8]}"):
+        code=st.text_input("2️⃣ Paste the code", key="oauth_code")
+        if code and st.button("🔗 Connect", key="connect_oauth"):
             try:
                 rt=yt_connect(code.strip()); st.success("Connected ✅")
                 if rt: st.code(f'YT_REFRESH_TOKEN = "{rt}"')
             except Exception as e: st.error(str(e)[:120])
-        if st.button("🔄 Recover / rebuild from YouTube", key=f"recover_yt_{uuid.uuid4().hex[:8]}"):
+        if st.button("🔄 Recover / rebuild from YouTube", key="recover_yt"):
             with st.spinner("🔄 Scanning your channel…"):
                 ups=yt_channel_uploads(); cur=load_line(); hits=0
                 if not cur:
@@ -838,11 +838,11 @@ with st.sidebar:
                                     it["yt_id"]=vid; it["status"]="rendered"; hits+=1; break
                 save_line(cur); st.session_state.line=cur
             st.success(f"✅ Recovered {hits} episode(s) from YouTube.")
-        if st.button("🆕 NEW PROJECT", key=f"new_project_{uuid.uuid4().hex[:8]}"):
+        if st.button("🆕 NEW PROJECT", key="new_project"):
             jsave(LINE_F,[]); vault_save([]); st.session_state.line=[]; st.session_state.rendered_topics=[]; st.success("✅ New project started.")
-        if st.button("☁️ Backup line to Vault", key=f"backup_vault_{uuid.uuid4().hex[:8]}"):
+        if st.button("☁️ Backup line to Vault", key="backup_vault"):
             with st.spinner("☁️ Backing up…"): vault_save(load_line()); st.success("✅ Backed up.")
-        if st.button("⬇️ Restore line from Vault", key=f"restore_vault_{uuid.uuid4().hex[:8]}"):
+        if st.button("⬇️ Restore line from Vault", key="restore_vault"):
             with st.spinner("⬇️ Restoring…"):
                 r=vault_load()
                 if r: jsave(LINE_F,r); st.session_state.line=r; st.session_state.rendered_topics=[i["topic"] for i in r if i["status"]=="rendered"]; st.success(f"✅ Restored {len(r)} episode(s).")
@@ -880,7 +880,7 @@ with tab1:
         "The truth about ESG investing"
     ]
     
-    if st.button("🔍 GENERATE HOT TOPICS", key=f"gen_topics_{uuid.uuid4().hex[:8]}"):
+    if st.button("🔍 GENERATE HOT TOPICS", key="gen_topics_button"):
         scored_topics = []
         for topic in TOPIC_BANK:
             score = 65
@@ -899,13 +899,13 @@ with tab1:
         for i, item in enumerate(bull_items):
             emoji = "🟢" if item["sc"] >= 80 else "🟡" if item["sc"] >= 70 else "🔴"
             st.markdown(f"{emoji} **{item['t']}** · 🥚 `{item['sc']}/100`")
-            if st.button(f"➕ ADD '{item['t'][:30]}...'", key=f"add_{i}_{uuid.uuid4().hex[:8]}"):
+            if st.button(f"➕ ADD '{item['t'][:30]}...'", key=f"add_topic_{i}"):
                 jsave(LINE_F, [])
                 queue_topic(item["t"], item["sc"], item["src"])
                 st.session_state.line = load_line()
                 st.success(f"✅ Added '{item['t']}' — go to 🏭 2·PRODUCE")
     
-    if st.button("🎲 RANDOM FINANCE TOPIC", key=f"random_{uuid.uuid4().hex[:8]}"):
+    if st.button("🎲 RANDOM FINANCE TOPIC", key="random_topic_button"):
         random_topic = random.choice(TOPIC_BANK)
         score = 75 + random.randint(-10, 15)
         queue_topic(random_topic, score, "RANDOM")
@@ -915,14 +915,14 @@ with tab1:
     st.markdown("## 🧹 CLEAN SLATE TOOLS")
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("🆕 NEW PROJECT (CLEAR ALL)", key=f"new_project_clear_{uuid.uuid4().hex[:8]}"):
+        if st.button("🆕 NEW PROJECT (CLEAR ALL)", key="new_project_clear"):
             jsave(LINE_F, [])
             jsave(BIBLE_F, [])
             jsave(MET_F, [])
             st.session_state.line = []
             st.success("✅ Production line cleared")
     with c2:
-        if st.button("🔄 LOAD SAMPLE TOPICS", key=f"load_sample_{uuid.uuid4().hex[:8]}"):
+        if st.button("🔄 LOAD SAMPLE TOPICS", key="load_sample_topics"):
             sample_topics = [
                 {"topic": "Private equity firms buying US farmland", "score": 85, "status": "queued"},
                 {"topic": "The hidden fees in your 401(k)", "score": 82, "status": "queued"}
@@ -941,7 +941,7 @@ with tab2:
         st.info("Line is empty — do 🥚 1·SCAN, or use sidebar → Recover/Restore to bring back your work.")
     
     st.markdown("## 5️⃣ STEP 3 · Series potential")
-    if st.button("5️⃣ CHECK SERIES"):
+    if st.button("5️⃣ CHECK SERIES", key="check_series_button"):
         if line:
             try: st.session_state.splan=series_plan(line[0]["topic"])
             except Exception as e: st.error(f"Series check hiccup: {str(e)[:100]}")
@@ -957,7 +957,7 @@ with tab2:
         st.markdown("<div class='section'>📱 SHORTS PLAN — hooks & prompts</div>",unsafe_allow_html=True)
         for i,e in enumerate(spn.get("episodes",[])):
             st.markdown(f"<div class='card'><b>EP{i+1} Shorts:</b> 1) “{e} — the truth” 2) cold-open hook + bass drop 3) reveal teaser → end card “FULL FILM ON YOUTUBE”</div>",unsafe_allow_html=True)
-        if spn.get("series") and st.button("➕ ADD SERIES"):
+        if spn.get("series") and st.button("➕ ADD SERIES", key="add_series_button"):
             base_sc=(line[0].get("score",60) if line else 60)
             for e in spn.get("episodes",[]): queue_topic(e,base_sc,"SERIES")
             st.session_state.series_checked=True
@@ -967,7 +967,7 @@ with tab2:
     if flags["series"]:
         st.markdown("## 6️⃣ STEP 4 · Script + Gate")
         if any(i["status"]=="queued" for i in line):
-            if st.button("6️⃣ WRITE SCRIPT + GATE"):
+            if st.button("6️⃣ WRITE SCRIPT + GATE", key="write_script_button"):
                 it=next(x for x in line if x["status"]=="queued")
                 it["angle"]=it.get("angle") or angle
                 it["script"],g=script_with_floor(it["topic"],series,it["angle"]); it["gate"]=g
@@ -978,11 +978,11 @@ with tab2:
     cur=next((x for x in line if x["status"]=="scripted"),None)
     if cur:
         st.markdown("## 7️⃣ STEP 5 · Approve")
-        if st.button("🎬 COLD-OPEN A/B PREVIEWS"):
+        if st.button("🎬 COLD-OPEN A/B PREVIEWS", key="cold_open_previews"):
             st.session_state[f"cp_{line.index(cur)}"]=render_cold_open_preview(cur["script"],voice,mood,line.index(cur))
         for tag,p,txt in st.session_state.get(f"cp_{line.index(cur)}",[]):
             st.video(p); st.caption(f"**{tag}:** {txt}")
-        if st.button("7️⃣ APPROVE → UNLOCK RENDER"):
+        if st.button("7️⃣ APPROVE → UNLOCK RENDER", key="approve_render_button"):
             cur["status"]="approved"; save_line(line); bible_append(line.index(cur)+1,cur["topic"],cur["script"])
             st.success("✅ Approved.")
     
@@ -1014,17 +1014,17 @@ with tab2:
         lv=jb["live"]; st.info(f"🟢 LIVE: EP {lv['ep']} {lv['topic']} — {lv['stage']} ({int(lv['pct']*100)}%)")
         st.progress(lv["pct"])
     for ln in jb["log"][-6:]: st.caption(ln)
-    st.button("🔄 REFRESH STATUS")
+    st.button("🔄 REFRESH STATUS", key="refresh_status_button")
     cA,cB=st.columns(2)
-    if cA.button("8️⃣ RENDER NEXT (background)"):
+    if cA.button("8️⃣ RENDER NEXT (background)", key="render_next_button"):
         if not job_load()["running"]:
             nx=next((x for x in line if x["status"]=="approved"),None)
             if nx: threading.Thread(target=batch_worker,args=([nx["topic"]],auto_upload,auto_schedule,auto_feed),daemon=True).start(); st.success("☁️ Started.")
-    if cB.button("8️⃣ RENDER ENTIRE LINE"):
+    if cB.button("8️⃣ RENDER ENTIRE LINE", key="render_entire_line_button"):
         if not job_load()["running"]:
             threading.Thread(target=batch_worker,args=(None,auto_upload,auto_schedule,auto_feed),daemon=True).start(); st.success("☁️ Batch started.")
     if not jb["running"] and any(x["status"] in ("queued","approved","scripted") for x in line):
-        if st.button("▶️ RESUME UNFINISHED BATCH"):
+        if st.button("▶️ RESUME UNFINISHED BATCH", key="resume_batch_button"):
             threading.Thread(target=batch_worker,args=(None,auto_upload,auto_schedule,auto_feed),daemon=True).start(); st.success("☁️ Resumed.")
     jl=job_load()
     if jl.get("live"): st.markdown(f"<div class='card winner'>🔴 NOW: EP {jl['live']['ep']} {jl['live']['topic']} — {jl['live']['stage']} ({int(jl['live']['pct']*100)}%)</div>",unsafe_allow_html=True)
@@ -1036,10 +1036,10 @@ with tab2:
 # OTHER TABS (KEEP EXISTING CONTENT)
 with tabS:
     st.markdown("## 💼 SPONSOR SUITE")
-    spn=st.text_input("Sponsor name","")
-    sps=st.text_area("Ad read script","")
-    spo=st.checkbox("✅ Approved")
-    if st.button("💾 SAVE SLOT"):
+    spn=st.text_input("Sponsor name","", key="sponsor_name")
+    sps=st.text_area("Ad read script","", key="sponsor_script")
+    spo=st.checkbox("✅ Approved", key="sponsor_approved")
+    if st.button("💾 SAVE SLOT", key="save_sponsor_slot"):
         if spn: jsave(SPO_F,{"name":spn,"script":sps,"place":"After cold open + title","approved":spo}); st.success("✅")
 
 with tab3:
@@ -1047,10 +1047,10 @@ with tab3:
     rendered=[i for i in line if i["status"]=="rendered" and i.get("out") and os.path.exists(i["out"])]
     if not rendered: st.warning("⬅️ Render first, or use sidebar → 'Recover / rebuild from YouTube' to relink uploaded episodes.")
     else:
-        ch=st.selectbox("Episode to pack",[i["topic"] for i in rendered])
+        ch=st.selectbox("Episode to pack",[i["topic"] for i in rendered], key="episode_pack_select")
         it=rendered[[i["topic"] for i in rendered].index(ch)]
         if it.get("yt_id"): st.markdown(f"[▶️ **Watch on YouTube**](https://www.youtube.com/watch?v={it['yt_id']})")
-        if st.button("📦 BUILD PUBLISH PACK"):
+        if st.button("📦 BUILD PUBLISH PACK", key="build_pack_button"):
             try:
                 entries,safe,extra=pack_entries(it,ep_num,support,shop,series)
                 z=io.BytesIO()
@@ -1059,14 +1059,14 @@ with tab3:
                         if ip: zf.write(d,n)
                         else: zf.writestr(n,d)
                 st.session_state.packed=True
-                st.download_button("📦 DOWNLOAD PACK",z.getvalue(),f"SHADOW_LEDGER_PACK_{ep_num}.zip")
+                st.download_button("📦 DOWNLOAD PACK",z.getvalue(),f"SHADOW_LEDGER_PACK_{ep_num}.zip", key="download_pack_button")
                 st.success("✅ Pack ready.")
             except Exception as e:
                 st.error(f"Pack hiccup: {str(e)[:120]} — try again.")
 
 with tab4:
     st.caption("Your money dashboard: revenue forecast + ramp phase + YPP readiness.")
-    rf=revenue_forecast()  # NOW WORKS WITHOUT ERRORS
+    rf=revenue_forecast()
     st.markdown(f"**Projected:** ${rf['usd']:.0f}/mo ≈ R{rf['zar']:.0f} · Subs ~{rf['subs']} · {'✅ YPP-ready' if rf['yt_ready'] else '⏳ building'}")
     if rf["target"]: st.success("🏆 R100k/month TARGET REACHED")
     st.markdown("""**v53 — FREE-TOOLS, MASTERFUL ART.** Google WaveNet voice (free premium) + Gemini/Groq free scripts + Pexels/Pixabay
@@ -1114,8 +1114,8 @@ with tab5:
     st.markdown("## 👹 AUTO MONSTER MODE")
     st.caption("One-click 3-6 months of finance content. Generates, renders, uploads, and schedules everything.")
     
-    months = st.slider("📅 Months of content", 3, 6, 3)
-    if st.button("🔥 LAUNCH AUTO MONSTER"):
+    months = st.slider("📅 Months of content", 3, 6, 3, key="auto_monster_months")
+    if st.button("🔥 LAUNCH AUTO MONSTER", key="launch_auto_monster"):
         threading.Thread(target=auto_monster, args=(months,), daemon=True).start()
         st.success("👹 Monster unleashed! Check '2·PRODUCE' for live progress.")
     
@@ -1125,7 +1125,7 @@ with tab5:
         st.info(f"🟢 MONSTER ACTIVE: {ramp['uploaded_count']}/{ramp['target_eps']} uploaded")
         st.progress(ramp["uploaded_count"]/ramp["target_eps"])
     
-    if st.button("⏹️ STOP AUTO MONSTER"):
+    if st.button("⏹️ STOP AUTO MONSTER", key="stop_auto_monster"):
         ramp["auto_mode"]=False
         ramp_state_save(ramp)
         st.success("Monster paused. Manual mode restored.")
@@ -1138,7 +1138,7 @@ with tab6:
     tier = get_tier()
     if tier == "free":
         st.info("💡 Switch to **App Plus** or **App Pro** in sidebar to unlock scaling")
-        episodes = st.slider("Episodes to generate", 1, 8, 4, disabled=True)
+        episodes = st.slider("Episodes to generate", 1, 8, 4, disabled=True, key="scale_slider_free")
         cost = 0
     else:
         # CALCULATE MAX EPISODES BASED ON CREDITS
@@ -1147,12 +1147,12 @@ with tab6:
         else:
             max_eps = 32
         
-        episodes = st.slider("Episodes to generate", 4, max_eps, min(8, max_eps), 4)
+        episodes = st.slider("Episodes to generate", 4, max_eps, min(8, max_eps), 4, key="scale_slider_paid")
         cost = calculate_cost(episodes)
         st.markdown(f"### 💰 Total Cost: **${cost:.2f}**")
     
     if episodes > 0 and tier != "free":
-        if st.button(f"🎬 GENERATE {episodes} EPISODES", key="scale_gen"):
+        if st.button(f"🎬 GENERATE {episodes} EPISODES", key="scale_generate_button"):
             with st.spinner(f"Generating {episodes} episodes..."):
                 topics = []
                 for i in range(episodes):
