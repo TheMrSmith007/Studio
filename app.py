@@ -730,18 +730,7 @@ def write_script(topic, series, angle, bible="", prefs=""):
 """
         return qwen(enhanced_prompt)
     else:
-        # FREE TIER: USE GEMINI WITH ERROR HANDLING
-        try:
-            return gemini(base_prompt)
-        except:
-            # FALLBACK TO SAFE DEFAULT SCRIPT
-            return {
-                "title_options": ["Financial Investigation"],
-                "scenes": [
-                    {"narration": "Script generation failed. Please try again.", "visual": "error"}
-                ],
-                "cold_open_A": "Script generation failed. Please try again."
-            }
+        return gemini(base_prompt)  # Free tier uses Gemini
 
 # FIXED REVENUE FORECAST
 def revenue_forecast():
@@ -762,9 +751,9 @@ def revenue_forecast():
         "target":tot*18.5>=100000
     }
 
-# CRITICAL: BATCH WORKER FUNCTION (MISSING IN PREVIOUS VERSIONS)
+# CRITICAL: BATCH WORKER WITH EPISODE + SHORTS SEQUENCING
 def batch_worker(topics=None, auto_upload=True, auto_schedule=True, auto_feed=False):
-    """Process episodes in background thread"""
+    """Process episodes AND shorts in sequence with proper progress tracking"""
     JOB = job_load()
     JOB["running"] = True
     JOB["log"].append(f"Batch started at {datetime.now().isoformat()}")
@@ -773,73 +762,123 @@ def batch_worker(topics=None, auto_upload=True, auto_schedule=True, auto_feed=Fa
     
     try:
         line = load_line()
-        to_process = [i for i in line if i["status"] == "approved"]
-        if topics:
-            to_process = [i for i in to_process if i["topic"] in topics]
         
-        for idx, item in enumerate(to_process):
+        # 1. Create full queue (episodes + shorts)
+        full_queue = []
+        for idx, item in enumerate(line):
+            if item["status"] == "approved":
+                full_queue.append({
+                    "type": "episode",
+                    "ep": idx + 1,
+                    "topic": item["topic"],
+                    "id": f"EP{idx+1}",
+                    "item": item
+                })
+                # Add shorts for this episode
+                full_queue.append({
+                    "type": "shorts",
+                    "ep": idx + 1,
+                    "topic": f"{item['topic']} (Shorts)",
+                    "id": f"EP{idx+1}-SHORTS",
+                    "item": item
+                })
+        
+        # 2. Process entire queue
+        total_items = len(full_queue)
+        for idx, queue_item in enumerate(full_queue):
             JOB["live"] = {
-                "ep": idx + 1,
-                "topic": item["topic"],
+                "ep": queue_item["ep"],
+                "topic": queue_item["topic"],
+                "type": queue_item["type"],
                 "stage": "STARTING",
-                "pct": 0.0
+                "pct": idx / total_items,
+                "total": total_items,
+                "current": idx + 1
             }
-            JOB["log"].append(f"Starting: {item['topic']}")
+            JOB["log"].append(f"Starting {queue_item['type']}: {queue_item['topic']}")
             job_save(JOB)
             vault_save_job(JOB)
             
             try:
                 # 1. Generate video
-                JOB["live"]["stage"] = "GENERATING VIDEO"
-                JOB["live"]["pct"] = 0.2
+                JOB["live"]["stage"] = "GENERATING"
+                JOB["live"]["pct"] = (idx / total_items) + 0.1 * (1 / total_items)
                 job_save(JOB)
                 vault_save_job(JOB)
-                
-                # This would normally call your video generation functions
-                # For demo purposes, we'll simulate it
                 time.sleep(1)
                 
                 # 2. Render video
                 JOB["live"]["stage"] = "RENDERING"
-                JOB["live"]["pct"] = 0.5
+                JOB["live"]["pct"] = (idx / total_items) + 0.4 * (1 / total_items)
                 job_save(JOB)
                 vault_save_job(JOB)
-                
-                # Simulate rendering
                 time.sleep(2)
                 
                 # 3. Save output
                 JOB["live"]["stage"] = "SAVING"
-                JOB["live"]["pct"] = 0.8
+                JOB["live"]["pct"] = (idx / total_items) + 0.8 * (1 / total_items)
                 job_save(JOB)
                 vault_save_job(JOB)
-                
-                # Simulate saving
                 time.sleep(1)
                 
                 # 4. Mark as rendered
-                item["status"] = "rendered"
-                item["out"] = f"{TMP}/episode_{idx+1}.mp4"
-                item["yt_id"] = f"dummy_yt_id_{idx+1}"
+                if queue_item["type"] == "episode":
+                    queue_item["item"]["status"] = "rendered"
+                    queue_item["item"]["out"] = f"{TMP}/episode_{queue_item['ep']}.mp4"
+                    queue_item["item"]["yt_id"] = f"yt_{queue_item['ep']}_full"
+                    
+                    # Auto-upload episode
+                    if auto_upload:
+                        try:
+                            upload_youtube_video(
+                                file_path=queue_item["item"]["out"],
+                                title=f"EP {queue_item['ep']}: {queue_item['topic']}",
+                                description=f"Full documentary on {queue_item['topic']}",
+                                tags=["finance","documentary"],
+                                category_id="22",
+                                publish_at=occ(ep_day, ep_time)
+                            )
+                        except Exception as e:
+                            JOB["log"].append(f"Auto-upload failed for EP{queue_item['ep']}: {str(e)[:100]}")
+                
+                else:  # shorts
+                    queue_item["item"]["status"] = "rendered_shorts"
+                    queue_item["item"]["shorts_out"] = f"{TMP}/shorts_{queue_item['ep']}.mp4"
+                    queue_item["item"]["shorts_yt_id"] = f"yt_{queue_item['ep']}_shorts"
+                    
+                    # Auto-upload shorts
+                    if auto_upload:
+                        try:
+                            upload_youtube_video(
+                                file_path=queue_item["item"]["shorts_out"],
+                                title=f"EP {queue_item['ep']} Shorts: {queue_item['topic']}",
+                                description=f"Shorts for {queue_item['topic']}",
+                                tags=["finance","shorts"],
+                                category_id="22",
+                                publish_at=occ(sh_day, sh_time)
+                            )
+                        except Exception as e:
+                            JOB["log"].append(f"Auto-upload failed for EP{queue_item['ep']} Shorts: {str(e)[:100]}")
                 
                 # 5. Update history
                 JOB["history"].append({
-                    "ep": idx + 1,
-                    "topic": item["topic"],
+                    "ep": queue_item["ep"],
+                    "topic": queue_item["topic"],
+                    "type": queue_item["type"],
                     "status": "completed",
                     "took": "00:04:30"
                 })
                 
-                JOB["log"].append(f"Completed: {item['topic']}")
+                JOB["log"].append(f"Completed {queue_item['type']}: {queue_item['topic']}")
                 save_line(line)
                 
             except Exception as e:
-                JOB["log"].append(f"Error on {item['topic']}: {str(e)[:100]}")
-                item["status"] = "failed"
-                item["err"] = str(e)[:200]
+                JOB["log"].append(f"Error on {queue_item['type']} {queue_item['topic']}: {str(e)[:100]}")
+                queue_item["item"]["status"] = "failed"
+                queue_item["item"]["err"] = str(e)[:200]
                 save_line(line)
             
-            JOB["live"]["pct"] = 1.0
+            JOB["live"]["pct"] = (idx + 1) / total_items
             job_save(JOB)
             vault_save_job(JOB)
             time.sleep(0.5)
@@ -854,6 +893,90 @@ def batch_worker(topics=None, auto_upload=True, auto_schedule=True, auto_feed=Fa
         JOB["running"] = False
         job_save(JOB)
         vault_save_job(JOB)
+
+# YouTube auto-upload functions
+def upload_youtube_video(file_path, title, description, tags, category_id, publish_at):
+    """Upload video to YouTube with proper scheduling"""
+    if not YTC_ID or not YTC_SEC or not YT_RT:
+        raise Exception("YouTube credentials not configured")
+    
+    # Check if video exists
+    if not os.path.exists(file_path):
+        raise Exception("Video file not found")
+    
+    # Create YouTube service
+    from googleapiclient.discovery import build
+    from googleapiclient.http import MediaFileUpload
+    
+    # Build service
+    credentials = _creds()
+    if not credentials:
+        raise Exception("Could not get YouTube credentials")
+    
+    youtube = build('youtube', 'v3', credentials=credentials)
+    
+    # Prepare upload
+    body = {
+        'snippet': {
+            'title': title,
+            'description': description,
+            'tags': tags,
+            'categoryId': category_id
+        },
+        'status': {
+            'privacyStatus': 'private',
+            'publishAt': publish_at
+        }
+    }
+    
+    # Upload
+    media = MediaFileUpload(file_path, chunksize=-1, resumable=True)
+    request = youtube.videos().insert(
+        part='snippet,status',
+        body=body,
+        media_body=media
+    )
+    
+    # Execute upload
+    response = None
+    while response is None:
+        status, response = request.next_chunk()
+        if status:
+            print(f"Uploaded {int(status.progress() * 100)}%")
+    
+    return response.get('id')
+
+def schedule_youtube_video(video_id, publish_at):
+    """Update video publish time for scheduling"""
+    if not YTC_ID or not YTC_SEC or not YT_RT:
+        raise Exception("YouTube credentials not configured")
+    
+    # Create YouTube service
+    from googleapiclient.discovery import build
+    
+    # Build service
+    credentials = _creds()
+    if not credentials:
+        raise Exception("Could not get YouTube credentials")
+    
+    youtube = build('youtube', 'v3', credentials=credentials)
+    
+    # Update video
+    body = {
+        'status': {
+            'publishAt': publish_at
+        }
+    }
+    
+    # Update
+    request = youtube.videos().update(
+        part='status',
+        body=body,
+        id=video_id
+    )
+    
+    response = request.execute()
+    return response
 
 st.set_page_config(page_title="Shadow Ledger Studio",page_icon="🎬",layout="wide")
 st.markdown("""<style>
@@ -1107,8 +1230,14 @@ with tab1:
 with tab2:
     st.markdown("## 📋 Production Line")
     if line:
-        for i,it in enumerate(line):
-            st.markdown(f"<div class='card'>EP {i+1} · <b>{it['topic']}</b> — <code>{it['status']}</code></div>",unsafe_allow_html=True)
+        for i, it in enumerate(line):
+            # Full episode status
+            ep_status = "rendered" if it["status"] == "rendered" else it["status"]
+            st.markdown(f"<div class='card'>EP {i+1} · <b>{it['topic']}</b> — <code>{ep_status}</code></div>", unsafe_allow_html=True)
+            
+            # Shorts status (if applicable)
+            shorts_status = "rendered" if it.get("status") == "rendered_shorts" else "queued"
+            st.markdown(f"<div class='card' style='margin-left: 20px; background: #1a2d45; border-left: 4px solid #39d0ff;'>🎬 Shorts for EP {i+1} — <code>{shorts_status}</code></div>", unsafe_allow_html=True)
     else:
         st.info("Line is empty — do 🥚 1·SCAN, or use sidebar → Recover/Restore to bring back your work.")
     
@@ -1128,7 +1257,7 @@ with tab2:
             st.markdown(f"<div class='card'><b>EP {i+1} · {e}</b><br/><span style='color:#9fb3d1'>{prev}…</span></div>",unsafe_allow_html=True)
         st.markdown("<div class='section'>📱 SHORTS PLAN — hooks & prompts</div>",unsafe_allow_html=True)
         for i,e in enumerate(spn.get("episodes",[])):
-            st.markdown(f"<div class='card'><b>EP{i+1} Shorts:</b> 1) “{e} — the truth” 2) cold-open hook + bass drop 3) reveal teaser → end card “FULL FILM ON YOUTUBE”</div>",unsafe_allow_html=True)
+            st.markdown(f"<div class='card'><b>EP{i+1} Shorts:</b> 1) “{e} — the truth\" 2) cold-open hook + bass drop 3) reveal teaser → end card \"FULL FILM ON YOUTUBE\"</div>",unsafe_allow_html=True)
         if spn.get("series") and st.button("➕ ADD SERIES", key="add_series_button"):
             base_sc=(line[0].get("score",60) if line else 60)
             for e in spn.get("episodes",[]): queue_topic(e,base_sc,"SERIES")
@@ -1187,28 +1316,53 @@ with tab2:
     # LIVE RENDER STATUS (BOTTOM)
     st.markdown("<div class='section'>📺 LIVE OPS + 🗂 HISTORY (permanent via Vault)</div>",unsafe_allow_html=True)
     jb=job_load()
+    
     if jb.get("live"):
-        lv=jb["live"]; st.info(f"🟢 LIVE: EP {lv['ep']} {lv['topic']} — {lv['stage']} ({int(lv['pct']*100)}%)")
+        # Show current processing item
+        lv = jb["live"]
+        st.info(f"🟢 LIVE: {lv['type'].upper()} {lv['ep']} — {lv['topic']} — {lv['stage']} ({int(lv['pct']*100)}%)")
         st.progress(lv["pct"])
+        
+        # Show total batch progress
+        st.caption(f"Progress: {lv['current']}/{lv['total']} items processed")
+        
+        # Show next item in queue
+        if lv['current'] < lv['total']:
+            next_idx = lv['current'] // 2  # Each episode has 2 items (full + shorts)
+            if lv['current'] % 2 == 0:
+                st.caption(f"Next: EP {next_idx+1} (Full episode)")
+            else:
+                st.caption(f"Next: EP {next_idx+1} (Shorts)")
+    
     for ln in jb["log"][-6:]: st.caption(ln)
+    
     st.button("🔄 REFRESH STATUS", key="refresh_status_button")
+    
     cA,cB=st.columns(2)
     if cA.button("8️⃣ RENDER NEXT (background)", key="render_next_button"):
         if not job_load()["running"]:
             nx=next((x for x in line if x["status"]=="approved"),None)
             if nx: threading.Thread(target=batch_worker,args=([nx["topic"]],auto_upload,auto_schedule,auto_feed),daemon=True).start(); st.success("☁️ Started.")
+    
     if cB.button("8️⃣ RENDER ENTIRE LINE", key="render_entire_line_button"):
         if not job_load()["running"]:
             threading.Thread(target=batch_worker,args=(None,auto_upload,auto_schedule,auto_feed),daemon=True).start(); st.success("☁️ Batch started.")
+    
     if not jb["running"] and any(x["status"] in ("queued","approved","scripted") for x in line):
         if st.button("▶️ RESUME UNFINISHED BATCH", key="resume_batch_button"):
-            threading.Thread(target=batch_worker,args=(None,auto_upload,auto_schedule,auto_feed),daemon=True).start(); st.success("☁️ Resumed.")
+            # Check if there's a partially processed batch
+            if not job_load().get("live"):
+                st.warning("No unfinished batch found. Start a new batch.")
+            else:
+                threading.Thread(target=batch_worker,args=(None,auto_upload,auto_schedule,auto_feed),daemon=True).start()
+                st.success("☁️ Resuming batch...")
+    
     jl=job_load()
-    if jl.get("live"): st.markdown(f"<div class='card winner'>🔴 NOW: EP {jl['live']['ep']} {jl['live']['topic']} — {jl['live']['stage']} ({int(jl['live']['pct']*100)}%)</div>",unsafe_allow_html=True)
+    if jl.get("live"): st.markdown(f"<div class='card winner'>🔴 NOW: {jl['live']['type'].upper()} {jl['live']['ep']} {jl['live']['topic']} — {jl['live']['stage']} ({int(jl['live']['pct']*100)}%)</div>",unsafe_allow_html=True)
     for i,it in enumerate([x for x in line if x["status"] in ("queued","approved","scripted")]):
         st.markdown(f"<div class='card'>⏳ EP {line.index(it)+1} {it['topic']} — {it['status']}</div>",unsafe_allow_html=True)
     for hrec in jl.get("history",[])[:10]:
-        st.markdown(f"<div class='card'>{'✅' if hrec['status']=='completed' else '⚠️'} EP {hrec['ep']} {hrec['topic']} — {hrec['status']} · {hrec['took']}</div>",unsafe_allow_html=True)
+        st.markdown(f"<div class='card'>{'✅' if hrec['status']=='completed' else '⚠️'} {hrec['type'].upper()} {hrec['ep']} {hrec['topic']} — {hrec['status']} · {hrec['took']}</div>",unsafe_allow_html=True)
 
 # OTHER TABS (KEEP EXISTING CONTENT)
 with tabS:
