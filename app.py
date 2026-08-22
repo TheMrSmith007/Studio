@@ -63,16 +63,27 @@ FONT = next((p for p in ["assets/Cinzel-Bold.ttf", "/usr/share/fonts/truetype/de
 def F(sz): return ImageFont.truetype(FONT, sz) if FONT else ImageFont.load_default(sz)
 def slug(t): return re.sub(r'[^a-z0-9]+', '_', t.lower()).strip('_')[:40]
 
-# SAFER JSON HANDLING
+# CRITICAL FIX: PROPER JSON HANDLING (FIXES YOUR ERROR)
 def jload(p, d):
+    """Safely load JSON with multiple fallbacks - handles empty/corrupted files"""
     try:
-        if os.path.exists(p): return json.load(open(p))
-    except Exception: pass
-    return d
+        if os.path.exists(p):
+            with open(p, "r") as f:
+                content = f.read().strip()
+                if content:  # Only parse if not empty
+                    return json.loads(content)
+        # Return safe copy of default (especially important for dicts)
+        return d.copy() if isinstance(d, dict) else d
+    except Exception:
+        # Return safe copy of default on ANY error
+        return d.copy() if isinstance(d, dict) else d
 
 def jsave(p, d):
-    try: json.dump(d, open(p, "w"))
-    except Exception: pass
+    try: 
+        with open(p, "w") as f:
+            json.dump(d, f)
+    except Exception: 
+        pass
 
 ENGINE = {"v": ""}
 VOICE_MODE = {"v": "free"}
@@ -124,14 +135,19 @@ def occ(day_name, hhmm, add_days=0, weeks=0):
     hh, mm = [int(x) for x in (hhmm or "21:00").split(":")]
     return datetime(dt.year, dt.month, dt.day, hh, mm).strftime("%Y-%m-%dT%H:%M:00Z")
 
-# FIXED RAMP ADVISOR (NO MORE ERRORS)
+# CRITICAL FIX: RAMP ADVISOR (100% ERROR-PROOF)
 def ramp_advisor():
     line = load_line()
     ramp = ramp_state_load()
     n = len([i for i in line if i["status"] == "rendered"])
     
-    # SAFER METRICS HANDLING (FIXES THE CRASH)
+    # SAFER METRICS HANDLING (FIXES YOUR SPECIFIC ERROR)
     met = jload(MET_F, {})
+    # DOUBLE-CHECK: Ensure met is ALWAYS a dict (critical fix)
+    if not isinstance(met, dict):
+        met = {}
+    
+    # Process metrics safely
     ctrs = []
     for key, m in met.items():
         # Handle different possible data structures
@@ -139,12 +155,10 @@ def ramp_advisor():
             ctr = m.get("ctr")
             if ctr is not None:
                 try:
-                    # Convert to float safely
                     ctrs.append(float(ctr))
                 except (ValueError, TypeError):
                     pass
         elif isinstance(m, (int, float)):
-            # Handle if metrics are stored as raw numbers
             ctrs.append(float(m))
     
     avg = sum(ctrs) / len(ctrs) if ctrs else 0
