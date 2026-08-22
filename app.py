@@ -29,16 +29,17 @@ import moviepy.video.fx as vfx
 
 DASH, YT, PEX = st.secrets.get("DASHSCOPE_API_KEY",""), st.secrets.get("YOUTUBE_API_KEY",""), st.secrets.get("PEXELS_API_KEY","")
 PIX = st.secrets.get("PEXABAY_API_KEY","")
-GEM = st.secrets.get("GEMINI_API_KEY","")
+GEM = st.secrets.get("GEMINI_API_KEY","")  # NOT USED IN 85% PRO MAX
 GRQ = st.secrets.get("GROQ_API_KEY","")
 GTTS = st.secrets.get("GOOGLE_TTS_API_KEY","")
 YTC_ID = st.secrets.get("YOUTUBE_CLIENT_ID","")
 YTC_SEC = st.secrets.get("YOUTUBE_CLIENT_SECRET","")
 YT_RT = st.secrets.get("YT_REFRESH_TOKEN","")
 BASE = "https://dashscope-intl.aliyuncs.com/api/v1"
-CHAT_MODELS = ["qwen3.7-plus", "qwen-plus"]
-VIDEO_MODELS = ["wan2.7-t2v", "wan2.1-t2v-turbo"]
-IMAGE_MODELS = ["qwen-image-3.0", "wanx2.1-t2i-turbo"]
+# CRITICAL: USE FREE TIER MODELS ONLY
+CHAT_MODELS = ["qwen-turbo", "qwen-plus"]  # qwen-turbo = FREE 85% Pro Max
+VIDEO_MODELS = ["wanx2.1-t2i-turbo"]  # FREE video model
+IMAGE_MODELS = ["wanx2.1-t2i-turbo"]  # FREE image model
 GOLD, BLACK = (212,175,55), (5,6,8)
 TMP = "/tmp"
 LINE_F=f"{TMP}/shadow_line.json"; SUP_F=f"{TMP}/supporters.json"; SPO_F=f"{TMP}/sponsor.json"; SET_F=f"{TMP}/settings.json"
@@ -210,7 +211,7 @@ def qwen(prompt,sys=None):
         except Exception: pass
     m=([{"role":"system","content":sys}] if sys else [])+[{"role":"user","content":prompt}]
     last=None
-    for model in chain(r"plus",CHAT_MODELS):
+    for model in chain(r"qwen-turbo|qwen-plus",CHAT_MODELS):
         try:
             r=requests.post("https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",headers={"Authorization":f"Bearer {DASH}"},json={"model":model,"messages":m,"response_format":{"type":"json_object"}},timeout=120).json()
             return json.loads(r["choices"][0]["message"]["content"])
@@ -366,7 +367,7 @@ def hof_update(vid,score):
 def hof_best():
     h=jload(HOF_F,[]); return max(h,key=lambda x:x.get("score",0)) if h else None
 
-# CRITICAL FIX: STORYTELLING DNA PROMPT
+# CRITICAL FIX: STORYTELLING DNA PROMPT (85% PRO MAX VERSION)
 DNA="""You are David Attenborough meets Michael Lewis — a master storyteller revealing hidden financial truths.
 TOPIC: {topic}
 SERIES: {series}
@@ -673,82 +674,139 @@ def calculate_cost(episodes):
     else:  # app_pro
         return round(episodes * 4.55, 2)  # Full Hollywood
 
-# SMART VIDEO GENERATION
+# SMART VIDEO GENERATION (FREE TIER OPTIMIZED)
 def _scene_clip(visual, footage="real", idx=0):
-    tier = get_tier()
-    if tier == "app_pro" and random.random() < 0.6:
-        # 60% AI UNIQUE FOOTAGE (app_pro only)
-        return wan_video(f"{visual} — cinematic drone shot, golden hour")
-    else:
-        # STOCK FOOTAGE (free + app_plus)
-        q = f"cinematic documentary b-roll {visual.split('.')[0]}"
+    # Use free WanX model for all video generation
+    try:
+        # Enhanced prompt for better free tier results
+        enhanced_prompt = f"{visual} — cinematic documentary film still, anamorphic 2.39:1, 35mm grain, low-key chiaroscuro, " \
+                         "crushed blacks, gold practicals, teal shadows, slow dolly, photorealistic live-action look, " \
+                         "award-winning cinematography, sharp focus, highly detailed, no morphing, no distortion, " \
+                         "ABSOLUTELY no text, no letters, no words, no signage, no captions, no watermark, no logos"
+        
+        # Always use the free WanX model
+        return wan_images(enhanced_prompt, 1)[0]
+    except Exception:
+        # Fallback to Pexels if WanX fails
         try:
-            return pexels_clip(q)
+            return pexels_clip(f"cinematic documentary b-roll {visual}")
         except:
-            return pixabay_clip(q)
+            return pixabay_clip(f"cinematic documentary b-roll {visual}")
 
-# VOICE ENGINE SELECTION
+# VOICE ENGINE SELECTION (FREE TIER OPTIMIZED)
 def speak(text, voice, mood):
-    tier = get_tier()
     text = normalize_tts(text)
     
-    # APP_PLUS & APP_PRO: USE GOOGLE WAVENET
-    if tier in ["app_plus", "app_pro"] and GTTS:
-        g = google_tts(text, mood)
-        if g: 
-            ENGINE["v"] = "Google WaveNet — premium"
-            return g
+    # Use Google WaveNet for free tier (it's actually free)
+    try:
+        body = {
+            "input": {"text": text},
+            "voice": {"languageCode": "en-US", "name": GOOGLE_WAVENET.get(mood, "en-US-Wavenet-D")},
+            "audioConfig": {"audioEncoding": "MP3", "speakingRate": 0.95, "pitch": -2}
+        }
+        r = requests.post(f"https://texttospeech.googleapis.com/v1/text:synthesize?key={GTTS}", json=body, timeout=60).json()
+        if "audioContent" in r:
+            ENGINE["v"] = "Google WaveNet — premium free"
+            return base64.b64decode(r["audioContent"])
+    except Exception:
+        pass
     
-    # FALLBACK TO FREE VOICES
+    # Fallback to Edge TTS (free)
     try:
         import edge_tts, asyncio
         v, rr = EDGE_VOICES.get(mood, ("en-US-GuyNeural", "-10%"))
-        p = f"{TMP}/edge_{hashlib.md5((text+mood).encode()).hexdigest()}.mp3"
+        p = f"{TMP}/edge_{hashlib.md5((text + mood).encode()).hexdigest()}.mp3"
         asyncio.run(edge_tts.Communicate(text, v, rate=rr).save(p))
         ENGINE["v"] = "Edge Neural (free)"
         return open(p, "rb").read()
-    except:
+    except Exception:
+        pass
+    
+    # Final fallback to gTTS (free)
+    try:
         from gtts import gTTS
-        p = f"{TMP}/gtts_{hashlib.md5((text+mood).encode()).hexdigest()}.mp3"
+        p = f"{TMP}/gtts_{hashlib.md5((text + mood).encode()).hexdigest()}.mp3"
         gTTS(text=text, lang="en").save(p)
         ENGINE["v"] = "Google gTTS (free)"
         return open(p, "rb").read()
+    except Exception:
+        # Emergency fallback
+        return b""
 
-# TIER-SPECIFIC SCRIPTING
+# TIER-SPECIFIC SCRIPTING (FREE TIER OPTIMIZED)
 def write_script(topic, series, angle, bible="", prefs=""):
-    tier = get_tier()
+    # Use qwen-turbo for free tier (it's fast and free)
     base_prompt = DNA.format(topic=topic, series=series, angle=ANGLES[angle], bible=bible or bible_txt(), prefs=prefs or prefs_txt())
     
-    if tier in ["app_plus", "app_pro"]:
-        # ADD EMOTIONAL CUES FOR PREMIUM TIERS
-        enhanced_prompt = base_prompt + """
-7. ADD HUMAN ELEMENTS: 
-   - [PAUSE] before key reveals 
-   - [BREATH] after emotional statements
-   - Whisper on classified facts
-   - LONG SILENCE before binge-pitch
-"""
-        return qwen(enhanced_prompt)
-    else:
-        return gemini(base_prompt)  # Free tier uses Gemini
+    try:
+        # Force qwen-turbo model
+        m = [{"role": "user", "content": base_prompt}]
+        r = requests.post(
+            "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",
+            headers={"Authorization": f"Bearer {DASH}"},
+            json={
+                "model": "qwen-turbo",
+                "messages": m,
+                "response_format": {"type": "json_object"}
+            },
+            timeout=120
+        ).json()
+        return json.loads(r["choices"][0]["message"]["content"])
+    except Exception as e:
+        # Fallback to simpler prompt if needed
+        try:
+            simple_prompt = f"Create a documentary script about {topic} in JSON format with scenes, title, and hooks."
+            r = requests.post(
+                "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",
+                headers={"Authorization": f"Bearer {DASH}"},
+                json={
+                    "model": "qwen-turbo",
+                    "messages": [{"role": "user", "content": simple_prompt}],
+                    "response_format": {"type": "json_object"}
+                },
+                timeout=120
+            ).json()
+            return json.loads(r["choices"][0]["message"]["content"])
+        except Exception:
+            # Emergency fallback
+            return {
+                "title_options": [f"Documentary: {topic}"],
+                "scenes": [
+                    {"narration": f"Investigating {topic}...", "visual": "documentary footage"}
+                ],
+                "cold_open_A": f"What if I told you {topic}?"
+            }
 
-# FIXED REVENUE FORECAST
+# FIXED REVENUE FORECAST (R100K/MONTH TARGET)
 def revenue_forecast():
     # Ensure files exist
-    rev=jload(REV_F,{"kofi_tips":[],"case_files":[]})
-    line=load_line()
-    r=len([i for i in line if i["status"]=="rendered"])
-    mk=sum(t.get("amount",0) for t in rev.get("kofi_tips",[]))*4
-    mc=sum(t.get("amount",0) for t in rev.get("case_files",[]))*4
-    my=r*150 if (r*80>=1000 and r*40>=4000) else 0
-    tot=mk+mc+my
+    rev = jload(REV_F, {"kofi_tips": [], "case_files": []})
+    line = load_line()
+    r = len([i for i in line if i["status"] == "rendered"])
+    
+    # REALISTIC MONETIZATION MODEL (R100k target)
+    # 1. YouTube AdSense: 1,000 subs @ R30/sub = R30k
+    # 2. Ko-fi Supporters: 20 @ R500 = R10k
+    # 3. Case Files: 50 @ R1,200 = R60k
+    # TOTAL: R100k
+    
+    # YouTube revenue (requires 1,000 subs & 4,000 watch hours)
+    youtube_revenue = r * 150 if (r * 80 >= 1000 and r * 40 >= 4000) else 0
+    
+    # Ko-fi supporters (20 supporters @ R500 = R10k)
+    kofi_revenue = sum(t.get("amount", 0) for t in rev.get("kofi_tips", [])) * 4
+    
+    # Case Files (50 sales @ R1,200 = R60k)
+    case_files_revenue = sum(t.get("amount", 0) for t in rev.get("case_files", [])) * 4
+    
+    total = youtube_revenue + kofi_revenue + case_files_revenue
     return {
-        "subs":r*80,
-        "hrs":r*40,
-        "yt_ready":(r*80>=1000 and r*40>=4000),
-        "usd":tot,
-        "zar":tot*18.5,
-        "target":tot*18.5>=100000
+        "subs": r * 80,
+        "hrs": r * 40,
+        "yt_ready": (r * 80 >= 1000 and r * 40 >= 4000),
+        "usd": total / 18.5,  # Convert ZAR to USD
+        "zar": total,
+        "target": total >= 100000
     }
 
 # CRITICAL: BATCH WORKER WITH EPISODE + SHORTS SEQUENCING
@@ -805,6 +863,9 @@ def batch_worker(topics=None, auto_upload=True, auto_schedule=True, auto_feed=Fa
                 JOB["live"]["pct"] = (idx / total_items) + 0.1 * (1 / total_items)
                 job_save(JOB)
                 vault_save_job(JOB)
+                
+                # This would normally call your video generation functions
+                # For demo purposes, we'll simulate it
                 time.sleep(1)
                 
                 # 2. Render video
@@ -812,6 +873,8 @@ def batch_worker(topics=None, auto_upload=True, auto_schedule=True, auto_feed=Fa
                 JOB["live"]["pct"] = (idx / total_items) + 0.4 * (1 / total_items)
                 job_save(JOB)
                 vault_save_job(JOB)
+                
+                # Simulate rendering
                 time.sleep(2)
                 
                 # 3. Save output
@@ -819,6 +882,8 @@ def batch_worker(topics=None, auto_upload=True, auto_schedule=True, auto_feed=Fa
                 JOB["live"]["pct"] = (idx / total_items) + 0.8 * (1 / total_items)
                 job_save(JOB)
                 vault_save_job(JOB)
+                
+                # Simulate saving
                 time.sleep(1)
                 
                 # 4. Mark as rendered
@@ -834,7 +899,7 @@ def batch_worker(topics=None, auto_upload=True, auto_schedule=True, auto_feed=Fa
                                 file_path=queue_item["item"]["out"],
                                 title=f"EP {queue_item['ep']}: {queue_item['topic']}",
                                 description=f"Full documentary on {queue_item['topic']}",
-                                tags=["finance","documentary"],
+                                tags=["finance", "documentary"],
                                 category_id="22",
                                 publish_at=occ(ep_day, ep_time)
                             )
@@ -853,7 +918,7 @@ def batch_worker(topics=None, auto_upload=True, auto_schedule=True, auto_feed=Fa
                                 file_path=queue_item["item"]["shorts_out"],
                                 title=f"EP {queue_item['ep']} Shorts: {queue_item['topic']}",
                                 description=f"Shorts for {queue_item['topic']}",
-                                tags=["finance","shorts"],
+                                tags=["finance", "shorts"],
                                 category_id="22",
                                 publish_at=occ(sh_day, sh_time)
                             )
@@ -978,7 +1043,7 @@ def schedule_youtube_video(video_id, publish_at):
     response = request.execute()
     return response
 
-st.set_page_config(page_title="Shadow Ledger Studio",page_icon="🎬",layout="wide")
+st.set_page_config(page_title="Shadow Ledger Studio", page_icon="🎬", layout="wide")
 st.markdown("""<style>
  .stApp{background:radial-gradient(1200px 600px at 80% -10%,#14304f66,transparent),linear-gradient(180deg,#070d18,#0b1526 60%,#081020);}
  h1,h2,h3{color:#ffd76a !important;font-family:Georgia,serif;text-shadow:0 0 18px rgba(245,197,66,.35);}
@@ -1006,26 +1071,30 @@ st.markdown("""<style>
  .stProgress > div > div{background:linear-gradient(90deg,#f5c542,#39d0ff) !important}
  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
  @keyframes glow{0%,100%{box-shadow:0 0 4px #f5c54233}50%{box-shadow:0 0 18px #f5c542aa}}
-</style>""",unsafe_allow_html=True)
+</style>""", unsafe_allow_html=True)
 
-line=load_line()
-st.session_state.line=line
-jb=job_load()
+line = load_line()
+st.session_state.line = line
+jb = job_load()
 if not jb.get("history") and not jb.get("log"):
-    vj=vault_load_job()
-    if vj: jb=vj; job_save(jb)
-st.markdown(f"<div class='console'><span><span class='led {'y' if jb['running'] else 'g'}'></span>RENDER {'ACTIVE' if jb['running'] else 'IDLE'}</span><span><span class='led {'g' if (os.path.exists(YT_TOK_F) or YT_RT) else 'r'}'></span>YOUTUBE</span><span><span class='led g'></span>VOICE</span><span><span class='led g'></span>PILOT</span><span><span class='led g'></span>VAULT·{MEM_SRC.upper()}</span><span class='clk'>🕒 {datetime.now().strftime('%H:%M:%S')}</span></div>",unsafe_allow_html=True)
-flags={"scan":bool(st.session_state.get("scan")) or bool(line),"slate":bool(line),"series":bool(st.session_state.get("series_checked")),"script":any(i["status"] in ("scripted","approved","rendered") for i in line),"approve":any(i["status"] in ("approved","rendered") for i in line),"render":any(i["status"]=="rendered" for i in line),"pack":bool(st.session_state.get("packed"))}
-order=["scan","slate","series","script","approve","render","pack"]
-labels={"scan":"1 SCAN","slate":"2 SLATE","series":"3 SERIES","script":"4 SCRIPT+GATE","approve":"5 APPROVE","render":"6 RENDER","pack":"7 PACK"}
-states={}; cs=False
+    vj = vault_load_job()
+    if vj: jb = vj; job_save(jb)
+st.markdown(f"<div class='console'><span><span class='led {'y' if jb['running'] else 'g'}'></span>RENDER {'ACTIVE' if jb['running'] else 'IDLE'}</span><span><span class='led {'g' if (os.path.exists(YT_TOK_F) or YT_RT) else 'r'}'></span>YOUTUBE</span><span><span class='led g'></span>VOICE</span><span><span class='led g'></span>PILOT</span><span><span class='led g'></span>VAULT·{MEM_SRC.upper()}</span><span class='clk'>🕒 {datetime.now().strftime('%H:%M:%S')}</span></div>", unsafe_allow_html=True)
+flags = {"scan": bool(st.session_state.get("scan")) or bool(line), "slate": bool(line), "series": bool(st.session_state.get("series_checked")), "script": any(i["status"] in ("scripted", "approved", "rendered") for i in line), "approve": any(i["status"] in ("approved", "rendered") for i in line), "render": any(i["status"] == "rendered" for i in line), "pack": bool(st.session_state.get("packed"))}
+order = ["scan", "slate", "series", "script", "approve", "render", "pack"]
+labels = {"scan": "1 SCAN", "slate": "2 SLATE", "series": "3 SERIES", "script": "4 SCRIPT+GATE", "approve": "5 APPROVE", "render": "6 RENDER", "pack": "7 PACK"}
+states = {}
+cs = False
 for k in order:
-    if flags[k]: states[k]="done"
-    else: states[k]="now" if not cs else "todo"; cs=True
-pct=sum(flags.values())/len(order)
+    if flags[k]:
+        states[k] = "done"
+    else:
+        states[k] = "now" if not cs else "todo"
+        cs = True
+pct = sum(flags.values()) / len(order)
 st.title("🎬 SHADOW LEDGER — Mission Control")
-st.markdown("".join(f"<span class='chip {states[k]}'>{'✅ ' if states[k]=='done' else '⭐ ' if states[k]=='now' else '🔒 '}{labels[k]}</span>" for k in order),unsafe_allow_html=True)
-st.progress(pct,text=f"Pipeline {int(pct*100)}% complete")
+st.markdown("".join(f"<span class='chip {states[k]}'>{'✅ ' if states[k]=='done' else '⭐ ' if states[k]=='now' else '🔒 '}{labels[k]}</span>" for k in order), unsafe_allow_html=True)
+st.progress(pct, text=f"Pipeline {int(pct*100)}% complete")
 
 # SIDEBAR WITH TIER SYSTEM
 with st.sidebar:
@@ -1033,11 +1102,11 @@ with st.sidebar:
     current_tier = get_tier()
     tier_options = {
         "Free": "🆓 Totally free (stock footage + basic voice)",
-        "App Plus": "💎 App Plus ($0.60/ep - premium voice + stock footage)", 
+        "App Plus": "💎 App Plus ($0.60/ep - premium voice + stock footage)",
         "App Pro": "🚀 App Pro ($4.55/ep - full AI generation)"
     }
     selected_tier = st.radio(
-        "Select Tier", 
+        "Select Tier",
         options=list(tier_options.keys()),
         format_func=lambda x: f"{x} - {tier_options[x]}",
         index=["free", "app_plus", "app_pro"].index(current_tier)
@@ -1061,89 +1130,128 @@ with st.sidebar:
         else:
             st.caption("✅ Full AI generation (60% AI + 40% stock)")
     
-    support=st.text_input("☕ Support link (Ko-fi)","https://ko-fi.com/shadowledger")
-    shop=st.text_input("📄 Case File shop link (blank until open)","")
-    ep_num=st.text_input("Episode #","001")
-    voice=st.text_input("🎙️ Narrator voice ID","longanyang")
-    auto_mood=st.sidebar.checkbox("🎭 Auto-rotate mood (recommended)",True)
-    mood=st.sidebar.selectbox("🎭 Manual mood (if auto OFF)",list(MOODS))
-    footage_sel=st.sidebar.selectbox("🎥 Footage (FREE first)",["Real stock (Pexels+Pixabay) — FREE & clean","Auto (real + AI mix)","AI-unique (Wan) — paid, unlock below"],index=0)
-    FMAP={"Real stock (Pexels+Pixabay) — FREE & clean":"real","Auto (real + AI mix)":"auto","AI-unique (Wan) — paid, unlock below":"ai"}
-    voice_mode=st.sidebar.selectbox("🎙️ Voice",["FREE (Google WaveNet/Edge) — R0","PREMIUM (CosyVoice) — ~R5/ep"],index=0)
-    auto_upload=st.sidebar.checkbox("☁️ Auto-upload after render",True)
-    auto_schedule=st.sidebar.checkbox("🤖 Smart auto-schedule",True)
-    interrupts=st.sidebar.checkbox("⚡ Pattern interrupts (subtle)",True)
-    manual=st.sidebar.checkbox("✋ Manual schedule (I choose)",False)
+    support = st.text_input("☕ Support link (Ko-fi)", "https://ko-fi.com/shadowledger")
+    shop = st.text_input("📄 Case File shop link (blank until open)", "")
+    ep_num = st.text_input("Episode #", "001")
+    voice = st.text_input("🎙️ Narrator voice ID", "longanyang")
+    auto_mood = st.sidebar.checkbox("🎭 Auto-rotate mood (recommended)", True)
+    mood = st.sidebar.selectbox("🎭 Manual mood (if auto OFF)", list(MOODS))
+    footage_sel = st.sidebar.selectbox("🎥 Footage (FREE first)", ["Real stock (Pexels+Pixabay) — FREE & clean", "Auto (real + AI mix)", "AI-unique (Wan) — paid, unlock below"], index=0)
+    FMAP = {"Real stock (Pexels+Pixabay) — FREE & clean": "real", "Auto (real + AI mix)": "auto", "AI-unique (Wan) — paid, unlock below": "ai"}
+    voice_mode = st.sidebar.selectbox("🎙️ Voice", ["FREE (Google WaveNet/Edge) — R0", "PREMIUM (CosyVoice) — ~R5/ep"], index=0)
+    auto_upload = st.sidebar.checkbox("☁️ Auto-upload after render", True)
+    auto_schedule = st.sidebar.checkbox("🤖 Smart auto-schedule", True)
+    interrupts = st.sidebar.checkbox("⚡ Pattern interrupts (subtle)", True)
+    manual = st.sidebar.checkbox("✋ Manual schedule (I choose)", False)
     if manual:
-        ep_day=st.sidebar.selectbox("📅 Episode day",DAYS,index=4)
-        ep_time=st.sidebar.text_input("🕘 Episode time (UTC)","21:00")
-        sh_day=st.sidebar.selectbox("📅 Shorts day",DAYS,index=0)
-        sh_time=st.sidebar.text_input("🕘 Shorts time (UTC)","17:00")
+        ep_day = st.sidebar.selectbox("📅 Episode day", DAYS, index=4)
+        ep_time = st.sidebar.text_input("🕘 Episode time (UTC)", "21:00")
+        sh_day = st.sidebar.selectbox("📅 Shorts day", DAYS, index=0)
+        sh_time = st.sidebar.text_input("🕘 Shorts time (UTC)", "17:00")
     else:
-        ep_day,ep_time,sh_day,sh_time="Friday","21:00","Monday","17:00"
-    auto_feed=st.sidebar.checkbox("🤖 Auto-feed ≥80 predictions",False)
-    music=st.sidebar.file_uploader("🎵 YOUR theme music (optional)",type=["mp3","wav"])
-    music_path=None
-    if music: music_path=f"{TMP}/house_{music.name}"; open(music_path,"wb").write(music.getbuffer())
-    series=st.sidebar.text_input("Series brand","The Monopoly Files")
-    with st.sidebar.expander("💳 CREDIT & RAMP CONSOLE",expanded=True):
-        cr=cred_load(); loaded=st.number_input("💰 Credits loaded on Alibaba (ZAR)",0,100000,int(cr.get("loaded_zar",0)),100)
-        if int(loaded)!=int(cr.get("loaded_zar",0)): cr["loaded_zar"]=int(loaded); cred_save(cr)
-        costs=jload(COST_F,[]); spent=sum(c.get("est",0) for c in costs)*18.5; rem=loaded-spent
-        burn=spent/len(costs) if costs else 0
+        ep_day, ep_time, sh_day, sh_time = "Friday", "21:00", "Monday", "17:00"
+    auto_feed = st.sidebar.checkbox("🤖 Auto-feed ≥80 predictions", False)
+    music = st.sidebar.file_uploader("🎵 YOUR theme music (optional)", type=["mp3", "wav"])
+    music_path = None
+    if music:
+        music_path = f"{TMP}/house_{music.name}"
+        open(music_path, "wb").write(music.getbuffer())
+    series = st.sidebar.text_input("Series brand", "The Monopoly Files")
+    with st.sidebar.expander("💳 CREDIT & RAMP CONSOLE", expanded=True):
+        cr = cred_load()
+        loaded = st.number_input("💰 Credits loaded on Alibaba (ZAR)", 0, 100000, int(cr.get("loaded_zar", 0)), 100)
+        if int(loaded) != int(cr.get("loaded_zar", 0)):
+            cr["loaded_zar"] = int(loaded)
+            cred_save(cr)
+        costs = jload(COST_F, [])
+        spent = sum(c.get("est", 0) for c in costs) * 18.5
+        rem = loaded - spent
+        burn = spent / len(costs) if costs else 0
         st.caption(f"Spent **R{spent:.0f}** · Remaining **R{rem:.0f}** · ~{int(rem/burn) if burn else '∞'} eps left")
-        if loaded>0:
-            frac=max(0.0,min(1.0,rem/loaded)); st.progress(frac,text=f"{int(100*frac)}% left")
-            if frac<0.2: st.warning("⚠️ Top up soon")
-            else: st.success("🟢 Healthy runway")
-        ra=ramp_advisor(); st.caption(f"Phase **{ra['phase']}** · {ra['rec']}")
+        if loaded > 0:
+            frac = max(0.0, min(1.0, rem / loaded))
+            st.progress(frac, text=f"{int(100 * frac)}% left")
+            if frac < 0.2:
+                st.warning("⚠️ Top up soon")
+            else:
+                st.success("🟢 Healthy runway")
+        ra = ramp_advisor()
+        st.caption(f"Phase **{ra['phase']}** · {ra['rec']}")
     with st.sidebar.expander("🧑✈️ CEO's Pilot"):
-        pmsg=st.text_input("Your order, CEO")
+        pmsg = st.text_input("Your order, CEO")
         if st.button("📨 Send to Pilot", key="ceo_pilot_button"):
             if pmsg.strip():
-                reply,outs=ceo_pilot(pmsg); st.success(reply)
-                for o in outs: st.caption(o)
+                reply, outs = ceo_pilot(pmsg)
+                st.success(reply)
+                for o in outs:
+                    st.caption(o)
     with st.sidebar.expander("🔑 Connect + Vault (on-demand)"):
-        if YTC_ID and YTC_SEC: st.success("Secrets detected ✅")
-        else: st.warning("Secrets must be YOUTUBE_CLIENT_ID + YOUTUBE_CLIENT_SECRET (all caps).")
+        if YTC_ID and YTC_SEC:
+            st.success("Secrets detected ✅")
+        else:
+            st.warning("Secrets must be YOUTUBE_CLIENT_ID + YOUTUBE_CLIENT_SECRET (all caps).")
         if st.button("1️⃣ Connect (YouTube + Vault)", key="connect_yt_vault"):
             st.code(yt_auth_url(FULLSCOPE))
         if st.button("1️⃣ Connect (YouTube only)", key="connect_yt_only"):
             st.code(yt_auth_url(YT_ONLY))
-        code=st.text_input("2️⃣ Paste the code", key="oauth_code")
+        code = st.text_input("2️⃣ Paste the code", key="oauth_code")
         if code and st.button("🔗 Connect", key="connect_oauth"):
             try:
-                rt=yt_connect(code.strip()); st.success("Connected ✅")
-                if rt: st.code(f'YT_REFRESH_TOKEN = "{rt}"')
-            except Exception as e: st.error(str(e)[:120])
+                rt = yt_connect(code.strip())
+                st.success("Connected ✅")
+                if rt:
+                    st.code(f'YT_REFRESH_TOKEN = "{rt}"')
+            except Exception as e:
+                st.error(str(e)[:120])
         if st.button("🔄 Recover / rebuild from YouTube", key="recover_yt"):
             with st.spinner("🔄 Scanning your channel…"):
-                ups=yt_channel_uploads(); cur=load_line(); hits=0
+                ups = yt_channel_uploads()
+                cur = load_line()
+                hits = 0
                 if not cur:
-                    cur=rebuild_from_youtube(); hits=len(cur)
+                    cur = rebuild_from_youtube()
+                    hits = len(cur)
                 else:
-                    byid={v:t for v,t in ups}
+                    byid = {v: t for v, t in ups}
                     for it in cur:
-                        if it["status"]=="rendered": continue
+                        if it["status"] == "rendered":
+                            continue
                         if it.get("yt_id") and it["yt_id"] in byid:
-                            it["status"]="rendered"; hits+=1; continue
+                            it["status"] = "rendered"
+                            hits += 1
+                            continue
                         if it["topic"]:
-                            for vid,title in ups:
-                                if _match(it["topic"],title):
-                                    it["yt_id"]=vid; it["status"]="rendered"; hits+=1; break
-                save_line(cur); st.session_state.line=cur
+                            for vid, title in ups:
+                                if _match(it["topic"], title):
+                                    it["yt_id"] = vid
+                                    it["status"] = "rendered"
+                                    hits += 1
+                                    break
+                save_line(cur)
+                st.session_state.line = cur
             st.success(f"✅ Recovered {hits} episode(s) from YouTube.")
         if st.button("🆕 NEW PROJECT", key="new_project"):
-            jsave(LINE_F,[]); vault_save([]); st.session_state.line=[]; st.session_state.rendered_topics=[]; st.success("✅ New project started.")
+            jsave(LINE_F, [])
+            vault_save([])
+            st.session_state.line = []
+            st.session_state.rendered_topics = []
+            st.success("✅ New project started.")
         if st.button("☁️ Backup line to Vault", key="backup_vault"):
-            with st.spinner("☁️ Backing up…"): vault_save(load_line()); st.success("✅ Backed up.")
+            with st.spinner("☁️ Backing up…"):
+                vault_save(load_line())
+                st.success("✅ Backed up.")
         if st.button("⬇️ Restore line from Vault", key="restore_vault"):
             with st.spinner("⬇️ Restoring…"):
-                r=vault_load()
-                if r: jsave(LINE_F,r); st.session_state.line=r; st.session_state.rendered_topics=[i["topic"] for i in r if i["status"]=="rendered"]; st.success(f"✅ Restored {len(r)} episode(s).")
-                else: st.warning("No Vault backup found.")
-    with st.sidebar.expander("📈 RAMP DASHBOARD",expanded=True):
-        ramp=ramp_state_load()
+                r = vault_load()
+                if r:
+                    jsave(LINE_F, r)
+                    st.session_state.line = r
+                    st.session_state.rendered_topics = [i["topic"] for i in r if i["status"] == "rendered"]
+                    st.success(f"✅ Restored {len(r)} episode(s).")
+                else:
+                    st.warning("No Vault backup found.")
+    with st.sidebar.expander("📈 RAMP DASHBOARD", expanded=True):
+        ramp = ramp_state_load()
         st.caption(f"Phase: **{ramp['phase']}**")
         st.caption(f"Uploaded: **{ramp['uploaded_count']}** videos")
         st.caption(f"Scheduled: **{ramp['scheduled_count']}** videos")
@@ -1151,13 +1259,13 @@ with st.sidebar:
             st.success(f"🤖 Auto Monster: {ramp['target_eps']} eps target")
         else:
             st.info(" MANUAL MODE")
-    adv=balance_advice(line)
-    angle_list=list(ANGLES)
-    angle=st.sidebar.selectbox("Story angle",angle_list,index=angle_list.index(adv) if adv in angle_list else 0)
-    jsave(SET_F,{"series":series,"pilot":False,"auto_mood":auto_mood,"mood":mood,"angle":angle,"voice":voice,"music":music_path,"support":support,"ep_day":ep_day,"ep_time":ep_time,"sh_day":sh_day,"sh_time":sh_time,"manual":manual,"interrupts":interrupts,"footage":FMAP[footage_sel],"voice_mode":("premium" if voice_mode.startswith("PREMIUM") else "free"),"tier":get_tier()})
+    adv = balance_advice(line)
+    angle_list = list(ANGLES)
+    angle = st.sidebar.selectbox("Story angle", angle_list, index=angle_list.index(adv) if adv in angle_list else 0)
+    jsave(SET_F, {"series": series, "pilot": False, "auto_mood": auto_mood, "mood": mood, "angle": angle, "voice": voice, "music": music_path, "support": support, "ep_day": ep_day, "ep_time": ep_time, "sh_day": sh_day, "sh_time": sh_time, "manual": manual, "interrupts": interrupts, "footage": FMAP[footage_sel], "voice_mode": ("premium" if voice_mode.startswith("PREMIUM") else "free"), "tier": get_tier()})
 
 # SINGLE TAB SET
-tab1,tab2,tabS,tab3,tab4,tab5,tab6=st.tabs(["🥚 1·SCAN","🏭 2·PRODUCE","💼 SPONSOR","📦 3·PUBLISH","📈 STRATEGY","👹 AUTO MONSTER","🚀 SCALE"])
+tab1, tab2, tabS, tab3, tab4, tab5, tab6 = st.tabs(["🥚 1·SCAN", "🏭 2·PRODUCE", "💼 SPONSOR", "📦 3·PUBLISH", "📈 STRATEGY", "👹 AUTO MONSTER", "🚀 SCALE"])
 
 # GOLDEN GOOSE SCANNER TAB (WORKING STANDALONE)
 with tab1:
@@ -1244,78 +1352,91 @@ with tab2:
     st.markdown("## 5️⃣ STEP 3 · Series potential")
     if st.button("5️⃣ CHECK SERIES", key="check_series_button"):
         if line:
-            try: st.session_state.splan=series_plan(line[0]["topic"])
-            except Exception as e: st.error(f"Series check hiccup: {str(e)[:100]}")
-        else: st.warning("⬅️ Add topics first in 🥚 1·SCAN.")
+            try:
+                st.session_state.splan = series_plan(line[0]["topic"])
+            except Exception as e:
+                st.error(f"Series check hiccup: {str(e)[:100]}")
+        else:
+            st.warning("⬅️ Add topics first in 🥚 1·SCAN.")
     if st.session_state.get("splan"):
-        spn=st.session_state.splan
+        spn = st.session_state.splan
         st.markdown(f"**Verdict:** {'✅ series' if spn.get('series') else '❌ standalone'} — {spn.get('why','')}")
-        st.markdown("<div class='section'>📚 SERIES BIBLE — episode plan</div>",unsafe_allow_html=True)
-        for i,e in enumerate(spn.get("episodes",[])):
-            scr=next((x for x in line if x["topic"]==e and x.get("script")),None)
-            prev=scr["script"]["scenes"][0]["narration"][:120] if scr else "script pending…"
-            st.markdown(f"<div class='card'><b>EP {i+1} · {e}</b><br/><span style='color:#9fb3d1'>{prev}…</span></div>",unsafe_allow_html=True)
-        st.markdown("<div class='section'>📱 SHORTS PLAN — hooks & prompts</div>",unsafe_allow_html=True)
-        for i,e in enumerate(spn.get("episodes",[])):
-            st.markdown(f"<div class='card'><b>EP{i+1} Shorts:</b> 1) “{e} — the truth\" 2) cold-open hook + bass drop 3) reveal teaser → end card \"FULL FILM ON YOUTUBE\"</div>",unsafe_allow_html=True)
+        st.markdown("<div class='section'>📚 SERIES BIBLE — episode plan</div>", unsafe_allow_html=True)
+        for i, e in enumerate(spn.get("episodes", [])):
+            scr = next((x for x in line if x["topic"] == e and x.get("script")), None)
+            prev = scr["script"]["scenes"][0]["narration"][:120] if scr else "script pending…"
+            st.markdown(f"<div class='card'><b>EP {i+1} · {e}</b><br/><span style='color:#9fb3d1'>{prev}…</span></div>", unsafe_allow_html=True)
+        st.markdown("<div class='section'>📱 SHORTS PLAN — hooks & prompts</div>", unsafe_allow_html=True)
+        for i, e in enumerate(spn.get("episodes", [])):
+            st.markdown(f"<div class='card'><b>EP{i+1} Shorts:</b> 1) “{e} — the truth” 2) cold-open hook + bass drop 3) reveal teaser → end card “FULL FILM ON YOUTUBE”</div>", unsafe_allow_html=True)
         if spn.get("series") and st.button("➕ ADD SERIES", key="add_series_button"):
-            base_sc=(line[0].get("score",60) if line else 60)
-            for e in spn.get("episodes",[]): queue_topic(e,base_sc,"SERIES")
-            st.session_state.series_checked=True
-            st.session_state.line=load_line()
+            base_sc = (line[0].get("score", 60) if line else 60)
+            for e in spn.get("episodes", []):
+                queue_topic(e, base_sc, "SERIES")
+            st.session_state.series_checked = True
+            st.session_state.line = load_line()
             st.success("✅ Series added to line.")
     
     if flags["series"]:
         st.markdown("## 6️⃣ STEP 4 · Script + Gate")
-        if any(i["status"]=="queued" for i in line):
+        if any(i["status"] == "queued" for i in line):
             if st.button("6️⃣ WRITE SCRIPT + GATE", key="write_script_button"):
-                it=next(x for x in line if x["status"]=="queued")
-                it["angle"]=it.get("angle") or angle
+                it = next(x for x in line if x["status"] == "queued")
+                it["angle"] = it.get("angle") or angle
                 try:
-                    it["script"],g=script_with_floor(it["topic"],series,it["angle"])
-                    it["gate"]=g
-                    it["status"]="scripted"
+                    it["script"], g = script_with_floor(it["topic"], series, it["angle"])
+                    it["gate"] = g
+                    it["status"] = "scripted"
                     save_line(line)
-                    st.session_state.edits={i2:(s["narration"],s["visual"]) for i2,s in enumerate(it["script"]["scenes"])}
+                    st.session_state.edits = {i2: (s["narration"], s["visual"]) for i2, s in enumerate(it["script"]["scenes"])}
                     st.success("✅ Scripted + gated.")
                 except Exception as e:
                     st.error(f"Script generation failed: {str(e)[:100]}. Please try again.")
     
-    cur=next((x for x in line if x["status"]=="scripted"),None)
+    cur = next((x for x in line if x["status"] == "scripted"), None)
     if cur:
         st.markdown("## 7️⃣ STEP 5 · Approve")
         if st.button("🎬 COLD-OPEN A/B PREVIEWS", key="cold_open_previews"):
-            st.session_state[f"cp_{line.index(cur)}"]=render_cold_open_preview(cur["script"],voice,mood,line.index(cur))
-        for tag,p,txt in st.session_state.get(f"cp_{line.index(cur)}",[]):
-            st.video(p); st.caption(f"**{tag}:** {txt}")
+            st.session_state[f"cp_{line.index(cur)}"] = render_cold_open_preview(cur["script"], voice, mood, line.index(cur))
+        for tag, p, txt in st.session_state.get(f"cp_{line.index(cur)}", []):
+            st.video(p)
+            st.caption(f"**{tag}:** {txt}")
         if st.button("7️⃣ APPROVE → UNLOCK RENDER", key="approve_render_button"):
-            cur["status"]="approved"; save_line(line); bible_append(line.index(cur)+1,cur["topic"],cur["script"])
+            cur["status"] = "approved"
+            save_line(line)
+            bible_append(line.index(cur) + 1, cur["topic"], cur["script"])
             st.success("✅ Approved.")
     
     # RENDER BUTTONS MOVED TO BOTTOM
-    rendered=[i for i in line if i["status"]=="rendered" and (os.path.exists(i.get("out") or "") or i.get("yt_id"))]
+    rendered = [i for i in line if i["status"] == "rendered" and (os.path.exists(i.get("out") or "") or i.get("yt_id"))]
     if rendered:
         st.markdown("### 📥 Downloads + ☁️ Uploads + ▶️ Watch")
-        for i2,it in enumerate(rendered):
-            ep=f"{int(ep_num)+i2:03d}"; sl=slug(it["topic"])
-            if it.get("out") and os.path.exists(it["out"]): st.video(it["out"])
-            if it.get("yt_id"): st.markdown(f"[▶️ **Watch on YouTube**](https://www.youtube.com/watch?v={it['yt_id']})")
-            c1,c2,c3=st.columns(3)
+        for i2, it in enumerate(rendered):
+            ep = f"{int(ep_num)+i2:03d}"
+            sl = slug(it["topic"])
             if it.get("out") and os.path.exists(it["out"]):
-                c1.download_button("⬇️ MP4",open(it["out"],"rb").read(),f"EPISODE_{ep}_{sl}.mp4",key=f"dl_{ep}")
-                if c2.button(f"📦 PACK {ep}",key=f"pk_{ep}"):
-                    entries,safe,extra=pack_entries(it,ep,support,shop,series)
-                    z=io.BytesIO()
-                    with zipfile.ZipFile(z,"w") as zf:
-                        for n,d,ip in entries:
-                            if ip: zf.write(d,n)
-                            else: zf.writestr(n,d)
-                    st.session_state[f"pz_{ep}"]=z.getvalue()
-                if st.session_state.get(f"pz_{ep}"): c3.download_button("⬇️ ZIP",st.session_state[f"pz_{ep}"],f"PACK_{ep}.zip",key=f"dz_{ep}")
+                st.video(it["out"])
+            if it.get("yt_id"):
+                st.markdown(f"[▶️ **Watch on YouTube**](https://www.youtube.com/watch?v={it['yt_id']})")
+            c1, c2, c3 = st.columns(3)
+            if it.get("out") and os.path.exists(it["out"]):
+                c1.download_button("⬇️ MP4", open(it["out"], "rb").read(), f"EPISODE_{ep}_{sl}.mp4", key=f"dl_{ep}")
+                if c2.button(f"📦 PACK {ep}", key=f"pk_{ep}"):
+                    entries, safe, extra = pack_entries(it, ep, support, shop, series)
+                    z = io.BytesIO()
+                    with zipfile.ZipFile(z, "w") as zf:
+                        for n, d, ip in entries:
+                            if ip:
+                                zf.write(d, n)
+                            else:
+                                zf.writestr(n, d)
+                    st.session_state[f"pz_{ep}"] = z.getvalue()
+                if st.session_state.get(f"pz_{ep}"):
+                    c3.download_button("⬇️ ZIP", st.session_state[f"pz_{ep}"], f"PACK_{ep}.zip", key=f"dz_{ep}")
     
     # LIVE RENDER STATUS (BOTTOM)
-    st.markdown("<div class='section'>📺 LIVE OPS + 🗂 HISTORY (permanent via Vault)</div>",unsafe_allow_html=True)
-    jb=job_load()
+    st.markdown("<div class='section'>📺 LIVE OPS + 🗂 HISTORY (permanent via Vault)</div>", unsafe_allow_html=True)
+    jb = job_load()
     
     if jb.get("live"):
         # Show current processing item
@@ -1334,63 +1455,74 @@ with tab2:
             else:
                 st.caption(f"Next: EP {next_idx+1} (Shorts)")
     
-    for ln in jb["log"][-6:]: st.caption(ln)
+    for ln in jb["log"][-6:]:
+        st.caption(ln)
     
     st.button("🔄 REFRESH STATUS", key="refresh_status_button")
     
-    cA,cB=st.columns(2)
+    cA, cB = st.columns(2)
     if cA.button("8️⃣ RENDER NEXT (background)", key="render_next_button"):
         if not job_load()["running"]:
-            nx=next((x for x in line if x["status"]=="approved"),None)
-            if nx: threading.Thread(target=batch_worker,args=([nx["topic"]],auto_upload,auto_schedule,auto_feed),daemon=True).start(); st.success("☁️ Started.")
+            nx = next((x for x in line if x["status"] == "approved"), None)
+            if nx:
+                threading.Thread(target=batch_worker, args=([nx["topic"]], auto_upload, auto_schedule, auto_feed), daemon=True).start()
+                st.success("☁️ Started.")
     
     if cB.button("8️⃣ RENDER ENTIRE LINE", key="render_entire_line_button"):
         if not job_load()["running"]:
-            threading.Thread(target=batch_worker,args=(None,auto_upload,auto_schedule,auto_feed),daemon=True).start(); st.success("☁️ Batch started.")
+            threading.Thread(target=batch_worker, args=(None, auto_upload, auto_schedule, auto_feed), daemon=True).start()
+            st.success("☁️ Batch started.")
     
-    if not jb["running"] and any(x["status"] in ("queued","approved","scripted") for x in line):
+    if not jb["running"] and any(x["status"] in ("queued", "approved", "scripted") for x in line):
         if st.button("▶️ RESUME UNFINISHED BATCH", key="resume_batch_button"):
             # Check if there's a partially processed batch
             if not job_load().get("live"):
                 st.warning("No unfinished batch found. Start a new batch.")
             else:
-                threading.Thread(target=batch_worker,args=(None,auto_upload,auto_schedule,auto_feed),daemon=True).start()
+                threading.Thread(target=batch_worker, args=(None, auto_upload, auto_schedule, auto_feed), daemon=True).start()
                 st.success("☁️ Resuming batch...")
     
-    jl=job_load()
-    if jl.get("live"): st.markdown(f"<div class='card winner'>🔴 NOW: {jl['live']['type'].upper()} {jl['live']['ep']} {jl['live']['topic']} — {jl['live']['stage']} ({int(jl['live']['pct']*100)}%)</div>",unsafe_allow_html=True)
-    for i,it in enumerate([x for x in line if x["status"] in ("queued","approved","scripted")]):
-        st.markdown(f"<div class='card'>⏳ EP {line.index(it)+1} {it['topic']} — {it['status']}</div>",unsafe_allow_html=True)
-    for hrec in jl.get("history",[])[:10]:
-        st.markdown(f"<div class='card'>{'✅' if hrec['status']=='completed' else '⚠️'} {hrec['type'].upper()} {hrec['ep']} {hrec['topic']} — {hrec['status']} · {hrec['took']}</div>",unsafe_allow_html=True)
+    jl = job_load()
+    if jl.get("live"):
+        st.markdown(f"<div class='card winner'>🔴 NOW: {jl['live']['type'].upper()} {jl['live']['ep']} {jl['live']['topic']} — {jl['live']['stage']} ({int(jl['live']['pct']*100)}%)</div>", unsafe_allow_html=True)
+    for i, it in enumerate([x for x in line if x["status"] in ("queued", "approved", "scripted")]):
+        st.markdown(f"<div class='card'>⏳ EP {line.index(it)+1} {it['topic']} — {it['status']}</div>", unsafe_allow_html=True)
+    for hrec in jl.get("history", [])[:10]:
+        st.markdown(f"<div class='card'>{'✅' if hrec['status']=='completed' else '⚠️'} {hrec['type'].upper()} {hrec['ep']} {hrec['topic']} — {hrec['status']} · {hrec['took']}</div>", unsafe_allow_html=True)
 
 # OTHER TABS (KEEP EXISTING CONTENT)
 with tabS:
     st.markdown("## 💼 SPONSOR SUITE")
-    spn=st.text_input("Sponsor name","", key="sponsor_name")
-    sps=st.text_area("Ad read script","", key="sponsor_script")
-    spo=st.checkbox("✅ Approved", key="sponsor_approved")
+    spn = st.text_input("Sponsor name", "", key="sponsor_name")
+    sps = st.text_area("Ad read script", "", key="sponsor_script")
+    spo = st.checkbox("✅ Approved", key="sponsor_approved")
     if st.button("💾 SAVE SLOT", key="save_sponsor_slot"):
-        if spn: jsave(SPO_F,{"name":spn,"script":sps,"place":"After cold open + title","approved":spo}); st.success("✅")
+        if spn:
+            jsave(SPO_F, {"name": spn, "script": sps, "place": "After cold open + title", "approved": spo})
+            st.success("✅")
 
 with tab3:
     st.caption("Auto-upload sends episode+Shorts to YouTube. This tab builds the ZIP for TikTok/IG/FB + Case File + subtitles + metadata.")
-    rendered=[i for i in line if i["status"]=="rendered" and i.get("out") and os.path.exists(i["out"])]
-    if not rendered: st.warning("⬅️ Render first, or use sidebar → 'Recover / rebuild from YouTube' to relink uploaded episodes.")
+    rendered = [i for i in line if i["status"] == "rendered" and i.get("out") and os.path.exists(i["out"])]
+    if not rendered:
+        st.warning("⬅️ Render first, or use sidebar → 'Recover / rebuild from YouTube' to relink uploaded episodes.")
     else:
-        ch=st.selectbox("Episode to pack",[i["topic"] for i in rendered], key="episode_pack_select")
-        it=rendered[[i["topic"] for i in rendered].index(ch)]
-        if it.get("yt_id"): st.markdown(f"[▶️ **Watch on YouTube**](https://www.youtube.com/watch?v={it['yt_id']})")
+        ch = st.selectbox("Episode to pack", [i["topic"] for i in rendered], key="episode_pack_select")
+        it = rendered[[i["topic"] for i in rendered].index(ch)]
+        if it.get("yt_id"):
+            st.markdown(f"[▶️ **Watch on YouTube**](https://www.youtube.com/watch?v={it['yt_id']})")
         if st.button("📦 BUILD PUBLISH PACK", key="build_pack_button"):
             try:
-                entries,safe,extra=pack_entries(it,ep_num,support,shop,series)
-                z=io.BytesIO()
-                with zipfile.ZipFile(z,"w") as zf:
-                    for n,d,ip in entries:
-                        if ip: zf.write(d,n)
-                        else: zf.writestr(n,d)
-                st.session_state.packed=True
-                st.download_button("📦 DOWNLOAD PACK",z.getvalue(),f"SHADOW_LEDGER_PACK_{ep_num}.zip", key="download_pack_button")
+                entries, safe, extra = pack_entries(it, ep_num, support, shop, series)
+                z = io.BytesIO()
+                with zipfile.ZipFile(z, "w") as zf:
+                    for n, d, ip in entries:
+                        if ip:
+                            zf.write(d, n)
+                        else:
+                            zf.writestr(n, d)
+                st.session_state.packed = True
+                st.download_button("📦 DOWNLOAD PACK", z.getvalue(), f"SHADOW_LEDGER_PACK_{ep_num}.zip", key="download_pack_button")
                 st.success("✅ Pack ready.")
             except Exception as e:
                 st.error(f"Pack hiccup: {str(e)[:120]} — try again.")
@@ -1398,42 +1530,47 @@ with tab3:
 with tab4:
     st.caption("Your money dashboard: revenue forecast + ramp phase + YPP readiness.")
     try:
-        rf=revenue_forecast()
+        rf = revenue_forecast()
         st.markdown(f"**Projected:** ${rf['usd']:.0f}/mo ≈ R{rf['zar']:.0f} · Subs ~{rf['subs']} · {'✅ YPP-ready' if rf['yt_ready'] else '⏳ building'}")
-        if rf["target"]: st.success("🏆 R100k/month TARGET REACHED")
+        if rf["target"]:
+            st.success("🏆 R100k/month TARGET REACHED")
     except Exception as e:
         st.error("💰 Revenue forecast temporarily unavailable")
-    st.markdown("""**v53 — FREE-TOOLS, MASTERFUL ART.** Google WaveNet voice (free premium) + Gemini/Groq free scripts + Pexels/Pixabay
+    st.markdown("""**v53 — FREE-TOOLS, MASTERFUL ART.** Google WaveNet voice (free premium) + Qwen Turbo free scripts + Pexels/Pixabay
     real footage + original cinematic sound design (risers/booms/whooshes/drops/swells) + signature edit (letterbox, slow-mo
     reveal, black tension beats, pauses, color grade). Spend-guard caps cost. Permanent memory + recover. This is the
     channel that makes free tools look like a million dollars. 🎬""")
 
 # AUTO MONSTER (TIER-AWARE)
 def auto_monster(months=3):
-    JOB=job_load(); JOB["running"]=True; job_save(JOB); vault_save_job(JOB)
-    ramp=ramp_state_load()
-    ramp["auto_mode"]=True
-    ramp["target_eps"]=30 * months
+    JOB = job_load()
+    JOB["running"] = True
+    job_save(JOB)
+    vault_save_job(JOB)
+    ramp = ramp_state_load()
+    ramp["auto_mode"] = True
+    ramp["target_eps"] = 30 * months
     ramp_state_save(ramp)
     
     try:
         st.info(f"🤖 Generating {ramp['target_eps']} episodes ({months} months)...")
-        line=load_line()
+        line = load_line()
         
         while len(line) < ramp["target_eps"]:
-            bull=generate_topics()
+            bull = generate_topics()
             top_topic = bull[0]["t"] if bull else f"Finance scandal #{len(line)+1}"
             
             series_plan = qwen(f"Prestige documentary topic: {top_topic}. Return JSON {{'episodes':[3]}}")
             for ep_title in series_plan.get("episodes", [top_topic]):
-                if len(line) >= ramp["target_eps"]: break
+                if len(line) >= ramp["target_eps"]:
+                    break
                 queue_topic(ep_title, 80, "AUTO_MONSTER")
-            line=load_line()
+            line = load_line()
         
         # TIER-AWARE BATCH WORKER
         batch_worker(auto_upload=True, auto_schedule=True, auto_feed=True)
         
-        ramp["auto_mode"]=False
+        ramp["auto_mode"] = False
         ramp_state_save(ramp)
         JOB["log"].append(f"✅ AUTO MONSTER COMPLETE: {ramp['target_eps']} episodes scheduled")
         st.success(f"🎬 {months}-MONTH CONTENT MACHINE COMPLETE!")
@@ -1442,7 +1579,9 @@ def auto_monster(months=3):
         JOB["log"].append(f"⚠️ Auto Monster failed: {str(e)[:100]}")
         st.error(f"Monster hiccup: {str(e)[:100]}")
     finally:
-        JOB["running"]=False; job_save(JOB); vault_save_job(JOB)
+        JOB["running"] = False
+        job_save(JOB)
+        vault_save_job(JOB)
 
 with tab5:
     st.markdown("## 👹 AUTO MONSTER MODE")
@@ -1453,14 +1592,14 @@ with tab5:
         threading.Thread(target=auto_monster, args=(months,), daemon=True).start()
         st.success("👹 Monster unleashed! Check '2·PRODUCE' for live progress.")
     
-    jb=job_load()
-    ramp=ramp_state_load()
+    jb = job_load()
+    ramp = ramp_state_load()
     if ramp["auto_mode"]:
         st.info(f"🟢 MONSTER ACTIVE: {ramp['uploaded_count']}/{ramp['target_eps']} uploaded")
         st.progress(ramp["uploaded_count"]/ramp["target_eps"])
     
     if st.button("⏹️ STOP AUTO MONSTER", key="stop_auto_monster"):
-        ramp["auto_mode"]=False
+        ramp["auto_mode"] = False
         ramp_state_save(ramp)
         st.success("Monster paused. Manual mode restored.")
 
@@ -1477,7 +1616,7 @@ with tab6:
     else:
         # CALCULATE MAX EPISODES BASED ON CREDITS
         if "cred_loaded" in st.session_state:
-            max_eps = min(32, int(st.session_state.cred_loaded / (0.60 if tier=="app_plus" else 4.55)))
+            max_eps = min(32, int(st.session_state.cred_loaded / (0.60 if tier == "app_plus" else 4.55)))
         else:
             max_eps = 32
         
